@@ -1,0 +1,16 @@
+{
+  "name": "@a2d2/claude-monitor-darwin-x64",
+  "version": "0.0.0",
+  "description": "macOS Intel binary for @a2d2/claude-monitor",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "bin": {
+    "claude-monitor": "bin/claude-monitor"
+  },
+  "files": ["bin/claude-monitor"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/a2d2-dev/claude-usage-monitor"
+  }
+}

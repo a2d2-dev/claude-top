@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find ~/.claude/projects -name *.jsonl)",
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(time go:*)"
+    ]
+  }
+}

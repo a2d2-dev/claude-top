@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Step 1: Cross-compile Go binaries ────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+            npm_pkg: claude-monitor-darwin-x64
+            bin: claude-monitor
+          - goos: darwin
+            goarch: arm64
+            npm_pkg: claude-monitor-darwin-arm64
+            bin: claude-monitor
+          - goos: linux
+            goarch: amd64
+            npm_pkg: claude-monitor-linux-x64
+            bin: claude-monitor
+          - goos: linux
+            goarch: arm64
+            npm_pkg: claude-monitor-linux-arm64
+            bin: claude-monitor
+          - goos: windows
+            goarch: amd64
+            npm_pkg: claude-monitor-windows-x64
+            bin: claude-monitor.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          go build \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -trimpath \
+            -o "npm/${{ matrix.npm_pkg }}/bin/${{ matrix.bin }}" \
+            .
+
+      - name: Mark binary executable (non-Windows)
+        if: matrix.goos != 'windows'
+        run: chmod +x "npm/${{ matrix.npm_pkg }}/bin/${{ matrix.bin }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.npm_pkg }}
+          path: npm/${{ matrix.npm_pkg }}/bin/
+          if-no-files-found: error
+
+  # ── Step 2: GitHub Release with all binaries ──────────────────────────────────
+  github-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/
+
+      - name: Rename for release
+        run: |
+          cd dist
+          for f in claude-monitor claude-monitor.exe; do
+            [ -f "$f" ] && mv "$f" "claude-monitor-${f##claude-monitor}"  || true
+          done
+          ls -lh
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum * > sha256sums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  # ── Step 3: Publish to npm ────────────────────────────────────────────────────
+  npm-publish:
+    name: Publish npm packages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Download all built binaries into their npm package directories.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: npm-bins/
+
+      - name: Place binaries into npm packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"   # strip leading 'v'
+          for dir in npm/claude-monitor-*/; do
+            pkg=$(basename "$dir")
+            bin_dir="npm-bins/bin-${pkg}"
+            if [ -d "$bin_dir" ]; then
+              cp -r "$bin_dir/." "$dir/bin/"
+              # Mark binaries executable
+              chmod +x "$dir/bin/"* 2>/dev/null || true
+            fi
+            # Stamp version into package.json
+            sed -i "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/" "$dir/package.json"
+          done
+          # Stamp version into main package and its optionalDependencies
+          sed -i "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/g" npm/claude-monitor/package.json
+          sed -i "s/: \"0.0.0\"/: \"$VERSION\"/g" npm/claude-monitor/package.json
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in npm/claude-monitor-*/; do
+            echo "Publishing $(basename $dir)…"
+            npm publish "$dir" --access public --provenance
+          done
+
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish npm/claude-monitor --access public --provenance

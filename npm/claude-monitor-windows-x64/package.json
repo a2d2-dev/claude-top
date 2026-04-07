@@ -1,0 +1,16 @@
+{
+  "name": "@a2d2/claude-monitor-windows-x64",
+  "version": "0.0.0",
+  "description": "Windows x64 binary for @a2d2/claude-monitor",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "bin": {
+    "claude-monitor": "bin/claude-monitor.exe"
+  },
+  "files": ["bin/claude-monitor.exe"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/a2d2-dev/claude-usage-monitor"
+  }
+}
