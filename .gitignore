@@ -1,3 +1,7 @@
 
 # npm platform binaries (added by CI, not committed)
 npm/claude-monitor-*/bin/
+
+# Backend build artifacts
+backend/node_modules/
+backend/.wrangler/
