@@ -135,9 +135,8 @@ jobs:
             # Stamp version into package.json
             sed -i "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/" "$dir/package.json"
           done
-          # Stamp version into main package and its optionalDependencies
-          sed -i "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/g" npm/claude-monitor/package.json
-          sed -i "s/: \"0.0.0\"/: \"$VERSION\"/g" npm/claude-monitor/package.json
+          # Stamp version into main package and all optionalDependencies entries
+          sed -i "s/\"0.0.0\"/\"$VERSION\"/g" npm/claude-monitor/package.json
 
       - name: Publish platform packages
         env:

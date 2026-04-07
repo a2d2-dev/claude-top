@@ -8,8 +8,8 @@
   "files": ["bin/claude-monitor.js"],
   "optionalDependencies": {
     "@a2d2/claude-monitor-darwin-arm64": "0.0.0",
-    "@a2d2/claude-monitor-darwin-x64":  "0.0.0",
-    "@a2d2/claude-monitor-linux-x64":   "0.0.0",
+    "@a2d2/claude-monitor-darwin-x64": "0.0.0",
+    "@a2d2/claude-monitor-linux-x64": "0.0.0",
     "@a2d2/claude-monitor-linux-arm64": "0.0.0",
     "@a2d2/claude-monitor-windows-x64": "0.0.0"
   },
