@@ -27,12 +27,6 @@ npm install -g @a2d2/claude-monitor
 claude-monitor
 ```
 
-### Homebrew (macOS / Linux)
-
-```bash
-brew install a2d2-dev/tap/claude-monitor
-```
-
 ### go install
 
 ```bash
