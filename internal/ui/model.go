@@ -11,6 +11,7 @@ import (
 	"github.com/a2d2-dev/claude-usage-monitor/internal/auth"
 	"github.com/a2d2-dev/claude-usage-monitor/internal/core"
 	"github.com/a2d2-dev/claude-usage-monitor/internal/data"
+	"github.com/a2d2-dev/claude-usage-monitor/internal/upload"
 )
 
 // refreshInterval is how often the monitor reloads data from disk.
@@ -93,6 +94,39 @@ type authState struct {
 	errMsg          string // populated on error
 }
 
+// ── Upload state ──────────────────────────────────────────────────────────────
+
+// uploadPhase tracks the stage of the upload flow.
+type uploadPhase int
+
+const (
+	uploadIdle       uploadPhase = iota // not in upload flow
+	uploadConfirm                       // showing confirmation dialog
+	uploadInProgress                    // upload in progress
+	uploadSuccess                       // upload complete
+	uploadError                         // upload failed
+)
+
+// uploadState holds all state for the upload overlay.
+type uploadState struct {
+	phase    uploadPhase
+	stats    *upload.MonthlyStats // populated in uploadConfirm
+	rank     int                  // populated on uploadSuccess
+	total    int                  // total users, populated on uploadSuccess
+	shareURL string               // populated on uploadSuccess
+	errMsg   string               // populated on uploadError
+}
+
+// ── Upload tea messages ────────────────────────────────────────────────────────
+
+// uploadResultMsg is sent when the upload API call completes.
+type uploadResultMsg struct {
+	Rank     int
+	Total    int
+	ShareURL string
+	Err      error
+}
+
 // ── Auth tea messages ──────────────────────────────────────────────────────────
 
 // authCodeMsg is sent when the device code has been received from GitHub.
@@ -170,6 +204,9 @@ type Model struct {
 
 	// Auth overlay — active when auth.phase != authIdle.
 	authOverlay authState
+
+	// Upload overlay — active when upload.phase != uploadIdle.
+	uploadOverlay uploadState
 }
 
 // NewModel creates a Model with the given plan and data path.
@@ -237,6 +274,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case authJWTMsg:
 		return m.handleAuthJWTMsg(msg)
 
+	case uploadResultMsg:
+		return m.handleUploadResult(msg)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg.String())
 	}
@@ -248,6 +288,11 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	// Auth overlay captures all keys while active.
 	if m.authOverlay.phase != authIdle {
 		return m.handleAuthKey(key)
+	}
+
+	// Upload overlay captures all keys while active.
+	if m.uploadOverlay.phase != uploadIdle {
+		return m.handleUploadKey2(key)
 	}
 
 	// Global keys.
@@ -596,22 +641,6 @@ func loadData(dataPath string) tea.Cmd {
 
 // ── Auth handlers ─────────────────────────────────────────────────────────────
 
-// handleUploadKey is called when the user presses `u`.
-// It checks stored auth and either starts the Device Flow or proceeds to upload.
-func (m Model) handleUploadKey() (tea.Model, tea.Cmd) {
-	info, _ := auth.LoadAuth()
-	if auth.IsAuthValid(info) {
-		// Already authenticated — show a brief message (upload confirm is Story 2.1).
-		m.authOverlay = authState{
-			phase: authSuccess,
-			login: info.GitHubLogin,
-		}
-		return m, nil
-	}
-	// Start Device Flow.
-	m.authOverlay = authState{phase: authRequesting}
-	return m, requestDeviceCodeCmd()
-}
 
 // handleAuthKey handles keys while the auth overlay is showing.
 func (m Model) handleAuthKey(key string) (tea.Model, tea.Cmd) {
@@ -667,13 +696,16 @@ func (m Model) handleAuthPollMsg(msg authPollMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleAuthJWTMsg processes the result of the backend /auth/verify call.
+// On success, immediately transitions to the upload confirmation dialog.
 func (m Model) handleAuthJWTMsg(msg authJWTMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
 		m.authOverlay = authState{phase: authError, errMsg: msg.Err.Error()}
 		return m, nil
 	}
-	m.authOverlay = authState{phase: authSuccess, login: msg.Login}
-	return m, nil
+	// Auth succeeded — clear overlay and open upload confirm.
+	m.authOverlay = authState{phase: authIdle}
+	info, _ := auth.LoadAuth()
+	return m.startUploadConfirm(info)
 }
 
 // ── Auth commands ─────────────────────────────────────────────────────────────
@@ -738,5 +770,109 @@ func verifyWithBackendCmd(accessToken string) tea.Cmd {
 			return authJWTMsg{Err: fmt.Errorf("save auth: %w", saveErr)}
 		}
 		return authJWTMsg{Login: resp.GitHubLogin}
+	}
+}
+
+// ── Upload handlers ────────────────────────────────────────────────────────────
+
+// handleUploadKey processes `u` when no overlay is active.
+// Redirects to Device Flow if not authenticated, otherwise shows confirm dialog.
+func (m Model) handleUploadKey() (tea.Model, tea.Cmd) {
+	info, _ := auth.LoadAuth()
+	if !auth.IsAuthValid(info) {
+		// Start Device Flow.
+		m.authOverlay = authState{phase: authRequesting}
+		return m, requestDeviceCodeCmd()
+	}
+	// Already authenticated: show upload confirmation.
+	return m.startUploadConfirm(info)
+}
+
+// startUploadConfirm aggregates the current month's stats and shows the
+// upload confirmation dialog. Called after successful auth or on 'u' if
+// already authenticated.
+func (m Model) startUploadConfirm(info *auth.AuthInfo) (tea.Model, tea.Cmd) {
+	stats, err := upload.AggregateCurrentMonth(m.blocks)
+	if err != nil {
+		m.uploadOverlay = uploadState{
+			phase:  uploadError,
+			errMsg: "数据聚合失败: " + err.Error(),
+		}
+		return m, nil
+	}
+	m.uploadOverlay = uploadState{
+		phase: uploadConfirm,
+		stats: stats,
+	}
+	return m, nil
+}
+
+// handleUploadKey2 handles keys while the upload overlay is showing.
+func (m Model) handleUploadKey2(key string) (tea.Model, tea.Cmd) {
+	switch m.uploadOverlay.phase {
+	case uploadConfirm:
+		switch key {
+		case "enter", "y":
+			// Start upload.
+			info, _ := auth.LoadAuth()
+			if !auth.IsAuthValid(info) {
+				m.uploadOverlay = uploadState{
+					phase:  uploadError,
+					errMsg: "JWT 已过期，请重新认证（u 键）",
+				}
+				return m, nil
+			}
+			m.uploadOverlay.phase = uploadInProgress
+			return m, doUploadCmd(info.JWT, m.uploadOverlay.stats)
+		case "esc", "n", "q":
+			m.uploadOverlay = uploadState{phase: uploadIdle}
+			return m, nil
+		}
+	case uploadSuccess, uploadError:
+		switch key {
+		case "esc", "enter", "q":
+			m.uploadOverlay = uploadState{phase: uploadIdle}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// handleUploadResult processes the uploadResultMsg from the HTTP call.
+func (m Model) handleUploadResult(msg uploadResultMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.uploadOverlay = uploadState{
+			phase:  uploadError,
+			errMsg: msg.Err.Error(),
+		}
+		return m, nil
+	}
+	m.uploadOverlay = uploadState{
+		phase:    uploadSuccess,
+		rank:     msg.Rank,
+		total:    msg.Total,
+		shareURL: msg.ShareURL,
+	}
+	return m, nil
+}
+
+// ── Upload command ─────────────────────────────────────────────────────────────
+
+// doUploadCmd runs the upload HTTP call in the background.
+func doUploadCmd(jwt string, stats *upload.MonthlyStats) tea.Cmd {
+	return func() tea.Msg {
+		device, err := auth.EnsureDevice()
+		if err != nil {
+			return uploadResultMsg{Err: fmt.Errorf("读取设备信息失败: %w", err)}
+		}
+		resp, err := upload.Upload(context.Background(), jwt, device, stats)
+		if err != nil {
+			return uploadResultMsg{Err: err}
+		}
+		return uploadResultMsg{
+			Rank:     resp.Rank,
+			Total:    resp.TotalUsers,
+			ShareURL: resp.ShareURL,
+		}
 	}
 }

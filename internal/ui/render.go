@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/a2d2-dev/claude-usage-monitor/internal/auth"
 	"github.com/a2d2-dev/claude-usage-monitor/internal/data"
 )
 
@@ -31,6 +32,12 @@ func RenderDashboard(m Model) string {
 	// Auth overlay takes over the content area.
 	if m.authOverlay.phase != authIdle {
 		content := renderAuthOverlay(m, contentH)
+		return strings.Join([]string{header, tabBar, content, footer}, "\n")
+	}
+
+	// Upload overlay takes over the content area.
+	if m.uploadOverlay.phase != uploadIdle {
+		content := renderUploadOverlay(m, contentH)
 		return strings.Join([]string{header, tabBar, content, footer}, "\n")
 	}
 
@@ -95,6 +102,18 @@ func renderFooter(m Model) string {
 			return mutedStyle.Render("  Enter/ESC dismiss")
 		default:
 			return mutedStyle.Render("  ESC cancel")
+		}
+	}
+
+	// Upload overlay has its own footer hint.
+	if m.uploadOverlay.phase != uploadIdle {
+		switch m.uploadOverlay.phase {
+		case uploadConfirm:
+			return mutedStyle.Render("  Enter/y 确认上传  ESC/n 取消")
+		case uploadInProgress:
+			return mutedStyle.Render("  正在上传…")
+		default:
+			return mutedStyle.Render("  Enter/ESC 关闭")
 		}
 	}
 
@@ -737,6 +756,90 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ── Auth overlay ──────────────────────────────────────────────────────────────
+
+// ── Upload overlay ────────────────────────────────────────────────────────────
+
+// renderUploadOverlay renders the upload confirmation / status panel,
+// replacing the normal content area. It shows different content per upload phase.
+func renderUploadOverlay(m Model, height int) string {
+	st := m.uploadOverlay
+	innerW := m.width - 4
+
+	var lines []string
+
+	switch st.phase {
+	case uploadConfirm:
+		s := st.stats
+		lines = []string{
+			sectionTitleStyle.Render("  📤 上传月度统计"),
+			"",
+			fmt.Sprintf("  %-12s %s", "周期：", accentValueStyle.Render(s.Period)),
+		}
+		// Device name
+		if dev, err := loadDeviceName(); err == nil {
+			lines = append(lines, fmt.Sprintf("  %-12s %s", "设备：", valueStyle.Render(dev)))
+		}
+		lines = append(lines,
+			fmt.Sprintf("  %-12s %s", "费用：", accentValueStyle.Render(fmt.Sprintf("$%.4f", s.TotalCostUSD))),
+			fmt.Sprintf("  %-12s %s", "Token 数：", valueStyle.Render(formatTokenCount(s.TotalTokens()))),
+			fmt.Sprintf("  %-12s %s", "Session 数：", valueStyle.Render(fmt.Sprintf("%d", s.SessionCount))),
+			"",
+			mutedStyle.Render("  仅上传聚合统计，不含 prompt 内容或文件路径"),
+		)
+
+	case uploadInProgress:
+		lines = []string{
+			sectionTitleStyle.Render("  📤 正在上传…"),
+			"",
+			mutedStyle.Render("  请稍候…"),
+		}
+
+	case uploadSuccess:
+		lines = []string{
+			sectionTitleStyle.Render("  ✓ 上传成功"),
+			"",
+			fmt.Sprintf("  %-12s %s", "全球排名：",
+				accentValueStyle.Render(fmt.Sprintf("#%d / %d", st.rank, st.total))),
+			"",
+			"  分享链接：",
+			"",
+			lipgloss.NewStyle().Foreground(colorSuccess).Render("     " + st.shareURL),
+		}
+
+	case uploadError:
+		lines = []string{
+			lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render("  ✗ 上传失败"),
+			"",
+			lipgloss.NewStyle().Foreground(colorWarning).Render("  " + st.errMsg),
+		}
+	}
+
+	content := padToHeight(strings.Join(lines, "\n"), height-2)
+	return cardStyle.Width(innerW).Height(height - 2).Render(content)
+}
+
+// loadDeviceName returns the device name from storage, or "" on error.
+func loadDeviceName() (string, error) {
+	dev, err := auth.LoadDevice()
+	if err != nil || dev == nil {
+		return "", err
+	}
+	return dev.DeviceName, nil
+}
+
+// formatTokenCount formats a token count with K/M suffix for readability.
+func formatTokenCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // ── Auth overlay ──────────────────────────────────────────────────────────────

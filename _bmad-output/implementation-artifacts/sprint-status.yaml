@@ -10,9 +10,9 @@ development_status:
   1-2-device-uuid-management: done
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-upload-confirm-ui: backlog
-  2-2-data-aggregation-payload: backlog
+  epic-2: done
+  2-1-upload-confirm-ui: done
+  2-2-data-aggregation-payload: done
   epic-2-retrospective: optional
 
   epic-3: backlog
