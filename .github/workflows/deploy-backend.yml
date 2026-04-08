@@ -23,13 +23,14 @@ jobs:
         working-directory: backend
         run: npm install -g pnpm && pnpm install --frozen-lockfile
 
-      # Substitute resource IDs from GitHub Secrets into wrangler config.
+      # Substitute resource IDs from GitHub Variables into wrangler config.
+      # These are non-sensitive resource identifiers, stored as vars (not secrets).
       # wrangler.toml contains ${VAR} placeholders — never real IDs.
       - name: Generate wrangler config
         working-directory: backend
         env:
-          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
-          CLOUDFLARE_KV_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_KV_NAMESPACE_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_KV_NAMESPACE_ID: ${{ vars.CLOUDFLARE_KV_NAMESPACE_ID }}
         run: envsubst < wrangler.toml > wrangler.generated.toml
 
       - name: Deploy Worker
