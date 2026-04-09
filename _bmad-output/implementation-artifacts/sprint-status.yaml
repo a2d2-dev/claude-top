@@ -29,7 +29,7 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: in-progress
-  5-1-codex-data-parsing-cache: backlog
+  5-1-codex-data-parsing-cache: ready-for-dev
   5-2-sessions-tab-multi-source: backlog
   5-3-overview-per-source-stats: backlog
   5-4-settings-panel: backlog
