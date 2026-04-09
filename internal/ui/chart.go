@@ -139,13 +139,7 @@ func RenderCostChart(entries []data.UsageEntry, start, end time.Time, innerW int
 	baseline := strings.Repeat(" ", chartYAxisW-1) + "└" + strings.Repeat("─", chartW)
 
 	// ── Time labels ───────────────────────────────────────────────────────────
-	startLabel := start.Local().Format("15:04")
-	endLabel := end.Local().Format("15:04")
-	gap := chartW - len(startLabel) - len(endLabel)
-	timeLine := strings.Repeat(" ", chartYAxisW) + startLabel
-	if gap > 0 {
-		timeLine += strings.Repeat(" ", gap) + endLabel
-	}
+	timeLine := strings.Repeat(" ", chartYAxisW) + buildTimeLabels(start, end, chartW)
 
 	// ── Highlight marker row (▲ at selected message position) ─────────────────
 	markerLine := strings.Repeat(" ", chartYAxisW)
@@ -173,5 +167,76 @@ func RenderCostChart(entries []data.UsageEntry, start, end time.Time, innerW int
 
 	parts := append(rows, baseline, mutedStyle.Render(timeLine), markerLine, legend)
 	return strings.Join(parts, "\n")
+}
+
+// buildTimeLabels returns a string of exactly `width` runes with evenly-spaced
+// time tick labels along the X axis.
+//
+// If any tick falls on a different calendar day than start, all labels use the
+// "01-02 15:04" format (11 chars) so cross-midnight sessions are unambiguous.
+// Otherwise the compact "15:04" format (5 chars) is used.
+func buildTimeLabels(start, end time.Time, width int) string {
+	// Decide label format: use date prefix when session spans midnight.
+	useDateFmt := !sameLocalDay(start, end)
+	fmtTime := func(t time.Time) string {
+		if useDateFmt {
+			return t.Local().Format("01-02 15:04")
+		}
+		return t.Local().Format("15:04")
+	}
+
+	labelW := 5
+	if useDateFmt {
+		labelW = 11
+	}
+
+	// Compute how many evenly-spaced ticks we can fit (including start+end).
+	// Require at least 2 chars gap between labels.
+	const minGap = 2
+	nTicks := 2
+	for n := 6; n >= 3; n-- {
+		spacing := width / (n - 1)
+		if spacing >= labelW+minGap {
+			nTicks = n
+			break
+		}
+	}
+
+	// Build tick positions and labels.
+	buf := []rune(strings.Repeat(" ", width))
+	place := func(pos int, label string) {
+		for i, r := range []rune(label) {
+			if p := pos + i; p >= 0 && p < width {
+				buf[p] = r
+			}
+		}
+	}
+
+	for i := 0; i < nTicks; i++ {
+		var pos int
+		var t time.Time
+		switch {
+		case i == 0:
+			pos = 0
+			t = start
+		case i == nTicks-1:
+			pos = width - labelW
+			t = end
+		default:
+			frac := float64(i) / float64(nTicks-1)
+			pos = int(frac * float64(width-labelW))
+			t = start.Add(time.Duration(float64(end.Sub(start)) * frac))
+		}
+		place(pos, fmtTime(t))
+	}
+
+	return string(buf)
+}
+
+// sameLocalDay reports whether two times fall on the same calendar day in local time.
+func sameLocalDay(a, b time.Time) bool {
+	ay, am, ad := a.Local().Date()
+	by, bm, bd := b.Local().Date()
+	return ay == by && am == bm && ad == bd
 }
 
