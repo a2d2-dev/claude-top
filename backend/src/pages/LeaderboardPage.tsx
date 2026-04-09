@@ -255,6 +255,84 @@ html[lang="zh"] [data-lang="en"] { display: none !important; }
 }
 .term-msg-row.sel { background: hsl(198 93% 59% / 0.08); color: var(--text); }
 
+/* 终端 Screen 切换 */
+.term-screen { display: none; animation: fadeIn 0.35s ease; }
+.term-screen.ts-active { display: block; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Overview screen */
+.term-ov-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.15rem 1rem; font-size: 0.65rem;
+}
+.term-bar-track {
+  flex: 1; height: 5px; background: hsl(215 19% 20%);
+  border-radius: 3px; overflow: hidden;
+}
+.term-bar-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--primary), hsl(142 70% 50%));
+}
+.term-stat-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 0.1rem 0; padding: 0.2rem 1rem;
+}
+.term-stat-item { font-size: 0.65rem; }
+.term-hint {
+  padding: 0.35rem 1rem;
+  font-size: 0.62rem; color: var(--text-dim);
+  border-top: 1px solid hsl(215 19% 20%);
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.term-hint-key {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 14px; border-radius: 3px;
+  background: hsl(215 19% 22%); border: 1px solid hsl(215 19% 30%);
+  color: var(--amber); font-size: 0.58rem; flex-shrink: 0;
+}
+
+/* Daily calendar */
+.term-cal { padding: 0.35rem 1rem 0; }
+.term-cal-hdr {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 2px; margin-bottom: 3px;
+}
+.cal-hdr-cell {
+  text-align: center; font-size: 0.58rem; color: var(--text-dim);
+}
+.term-cal-week {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 2px; margin-bottom: 2px;
+}
+.cal-day {
+  height: 10px; border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.5rem;
+}
+.d-nil { background: hsl(215 19% 16%); }
+.d-lo  { background: hsl(198 70% 30%); }
+.d-md  { background: hsl(38 80% 40%); }
+.d-hi  { background: hsl(142 60% 38%); }
+.d-pk  { background: hsl(142 70% 50%); }
+.d-today { outline: 1px solid var(--primary); outline-offset: 1px; }
+.term-cal-footer {
+  padding: 0.35rem 0 0.15rem;
+  font-size: 0.62rem; color: var(--text-dim);
+  display: flex; gap: 1rem;
+}
+
+/* Copy 按钮 */
+.btn-copy {
+  cursor: pointer; border: none; font-family: 'Space Mono', monospace;
+  font-size: 0.82rem; letter-spacing: 0;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+}
+.btn-copy:active { transform: scale(0.97); }
+.btn-copy-hint {
+  font-size: 0.65rem; opacity: 0.7; margin-left: 0.4rem;
+  font-family: inherit;
+}
+
 /* ── 分节 ── */
 .section {
   position: relative; z-index: 1;
@@ -441,9 +519,10 @@ td:last-child { color: var(--text-dim); font-family: 'Space Mono', monospace; fo
 }
 `;
 
-/** Tab + 语言切换脚本（内联，页面加载时立即执行）。 */
+/** 页面交互脚本：Tab 切换、语言切换、终端自动轮播、复制命令。 */
 const pageScript = `
 (function() {
+  // ── 页面 Tab ──
   function showTab(id) {
     document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
     document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
@@ -453,6 +532,8 @@ const pageScript = `
     if (btn)   btn.classList.add('active');
     try { sessionStorage.setItem('activeTab', id); } catch(e) {}
   }
+
+  // ── 语言切换 ──
   function toggleLang() {
     var cur  = document.documentElement.lang || 'en';
     var next = cur === 'en' ? 'zh' : 'en';
@@ -461,38 +542,84 @@ const pageScript = `
     if (btn) btn.textContent = next === 'zh' ? 'EN' : '中文';
     try { localStorage.setItem('lang', next); } catch(e) {}
   }
-  window.showTab  = showTab;
-  window.toggleLang = toggleLang;
+
+  // ── 终端 TUI 自动轮播 ──
+  var termScreens = ['overview', 'sessions', 'daily'];
+  var termIdx = 0;
+  function showTermScreen(name) {
+    document.querySelectorAll('.term-screen').forEach(function(s) { s.classList.remove('ts-active'); });
+    document.querySelectorAll('.term-ttab').forEach(function(t) { t.classList.remove('term-tab-active'); });
+    var s = document.getElementById('ts-' + name);
+    var t = document.getElementById('tt-' + name);
+    if (s) s.classList.add('ts-active');
+    if (t) t.classList.add('term-tab-active');
+  }
+  function cycleTermScreen() {
+    termIdx = (termIdx + 1) % termScreens.length;
+    showTermScreen(termScreens[termIdx]);
+  }
+
+  // ── 复制命令 ──
+  function copyCmd(el, cmd) {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(cmd).then(function() {
+      var orig = el.innerHTML;
+      el.innerHTML = '&#x2713; Copied!';
+      setTimeout(function() { el.innerHTML = orig; }, 2000);
+    });
+  }
+
+  window.showTab     = showTab;
+  window.toggleLang  = toggleLang;
+  window.copyCmd     = copyCmd;
+
   document.addEventListener('DOMContentLoaded', function() {
-    // 语言偏好
+    // 语言
     var lang = 'en';
     try { lang = localStorage.getItem('lang') || 'en'; } catch(e) {}
     document.documentElement.lang = lang;
-    var btn = document.getElementById('lang-btn');
-    if (btn) btn.textContent = lang === 'zh' ? 'EN' : '中文';
-    // Tab 偏好：URL hash 优先
-    var hash = location.hash.replace('#', '');
+    var lbtn = document.getElementById('lang-btn');
+    if (lbtn) lbtn.textContent = lang === 'zh' ? 'EN' : '中文';
+
+    // 页面 Tab
+    var hash      = location.hash.replace('#', '');
     var validTabs = ['leaderboard', 'about'];
     var tab = validTabs.indexOf(hash) !== -1 ? hash : 'leaderboard';
     try { tab = sessionStorage.getItem('activeTab') || tab; } catch(e) {}
     if (hash && validTabs.indexOf(hash) !== -1) tab = hash;
     showTab(tab);
+
+    // 终端轮播：先显示 overview，3.5 秒一循环
+    showTermScreen('overview');
+    setInterval(cycleTermScreen, 3500);
   });
 })();
 `;
 
 // ── 子组件 ────────────────────────────────────────────────────
 
-/** 仿 claude-top Sessions TUI 的终端窗口。内容基于真实截图。 */
+/**
+ * TerminalBlock — 三屏自动轮播的 claude-top TUI 仿真窗口。
+ * JS 每 3.5s 切换一次：Overview → Sessions → Daily → …
+ */
 const TerminalBlock = () => {
-  // 模拟 cost 柱状图数据（基于真实 session 数据形态）
   const bars = [
-    { h: 10, t: 'lo' }, { h: 8, t: 'lo' }, { h: 15, t: 'lo' }, { h: 12, t: 'lo' },
+    { h: 10, t: 'lo' }, { h: 8,  t: 'lo' }, { h: 15, t: 'lo' }, { h: 12, t: 'lo' },
     { h: 20, t: 'md' }, { h: 35, t: 'md' }, { h: 18, t: 'lo' }, { h: 28, t: 'md' },
     { h: 44, t: 'hi' }, { h: 32, t: 'md' }, { h: 22, t: 'md' }, { h: 12, t: 'lo' },
     { h: 25, t: 'md' }, { h: 16, t: 'lo' }, { h: 40, t: 'hi' }, { h: 30, t: 'md' },
-    { h: 18, t: 'lo' }, { h: 36, t: 'md' }, { h: 44, t: 'hi' }, { h: 8, t: 'lo' },
+    { h: 18, t: 'lo' }, { h: 36, t: 'md' }, { h: 44, t: 'hi' }, { h: 8,  t: 'lo' },
   ];
+
+  // 日历热力图数据（April 2026，每行一周 Mon→Sun）
+  const calWeeks = [
+    ['nil','nil','nil','lo', 'nil','nil','nil'],  // Apr 1 starts on Wed
+    ['nil','lo', 'md', 'lo', 'nil','nil','nil'],
+    ['nil','md', 'hi', 'pk', 'md', 'nil','nil'],
+    ['nil','hi', 'pk', 'hi', 'md', 'nil','nil'],
+    ['nil','md', 'lo', 'nil','nil','nil','nil'],  // Apr 28-30 + empty
+  ] as const;
+
   return (
     <div class="hero-terminal terminal">
       {/* 窗口标题栏 */}
@@ -501,74 +628,145 @@ const TerminalBlock = () => {
         <span class="term-title">claude-top — zsh</span>
       </div>
 
-      {/* 顶部 Tab 栏 */}
+      {/* Tab 栏（JS 切换 term-tab-active） */}
       <div class="term-tabs">
-        <span class="term-tab">Overview</span>
-        <span class="term-tab term-tab-active">● Sessions</span>
-        <span class="term-tab">Daily</span>
+        <span id="tt-overview" class="term-tab term-ttab">Overview</span>
+        <span id="tt-sessions" class="term-tab term-ttab">Sessions</span>
+        <span id="tt-daily"    class="term-tab term-ttab">Daily</span>
         <span style="margin-left:auto;padding:0.35rem 0.85rem;color:hsl(215 16% 46%);font-size:0.62rem">08:42:30</span>
       </div>
 
-      {/* Session 详情 */}
-      <div class="term-section-hdr">SESSION DETAIL</div>
-      <div class="term-info" style="color:hsl(210 20% 72%)">
-        Window: 2026-04-08 23:00 → 00:50&nbsp;
-        <span style="color:hsl(215 16% 46%)">(1h 50m) &nbsp;Dir: ~/backend</span>
-      </div>
-      <div class="term-model">
-        <span class="t-ok">● Sonnet 4.6</span>
-        <span style="color:hsl(215 16% 46%)"> &nbsp;10.8M</span>
-        <span class="t-ok"> &nbsp;$4.4332</span>
-        <span style="color:hsl(215 16% 46%)"> &nbsp;100.0%&nbsp;(143 msgs)</span>
-      </div>
+      {/* ── Screen 1: Overview ── */}
+      <div id="ts-overview" class="term-screen">
+        <div class="term-section-hdr" style="padding-bottom:0.2rem">MONTHLY OVERVIEW — 2026-04</div>
 
-      {/* Cost over time 柱状图 */}
-      <div class="term-chart-wrap">
-        <div class="term-chart-label">Cost over time</div>
-        <div class="term-chart">
-          {bars.map((b) => (
-            <span class={`chart-bar bar-${b.t}`} style={`height:${b.h}px`} />
-          ))}
+        <div class="term-ov-row" style="padding-top:0.4rem">
+          <span class="t-dim" style="min-width:4.5rem;font-size:0.62rem">Cost</span>
+          <div class="term-bar-track"><div class="term-bar-fill" style="width:62%" /></div>
+          <span class="t-ok" style="font-size:0.65rem;min-width:4rem;text-align:right">$12.40</span>
         </div>
-        <div class="term-chart-footer">peak $0.4306 &nbsp;|&nbsp; 46s/col &nbsp;|&nbsp; 143 msgs</div>
+        <div class="term-ov-row">
+          <span class="t-dim" style="min-width:4.5rem;font-size:0.62rem">Tokens</span>
+          <div class="term-bar-track"><div class="term-bar-fill" style="width:55%;background:var(--primary)" /></div>
+          <span class="t-cmd" style="font-size:0.65rem;min-width:4rem;text-align:right">10.8M</span>
+        </div>
+
+        <div class="term-stat-grid" style="margin-top:0.4rem">
+          <span class="term-stat-item t-dim">Sessions <span class="t-out">847</span></span>
+          <span class="term-stat-item t-dim">Devices  <span class="t-out">3</span></span>
+        </div>
+
+        <div style="border-top:1px solid hsl(215 19% 20%);margin:0.4rem 0" />
+
+        <div class="term-section-hdr" style="color:hsl(142 70% 50%)">● Active — claude-sonnet-4.6</div>
+        <div class="term-info">
+          Window: 23:00 → 00:50&nbsp;
+          <span class="t-dim">(1h 50m)&nbsp;&nbsp;Dir: ~/backend</span>
+        </div>
+        <div class="term-info">
+          <span class="t-ok">$4.4332</span>
+          <span class="t-dim">&nbsp;&nbsp;10.8M tokens&nbsp;&nbsp;143 msgs</span>
+        </div>
+
+        <div class="term-hint">
+          <span class="term-hint-key">u</span>
+          <span class="t-dim">upload &amp; join global leaderboard</span>
+        </div>
       </div>
 
-      {/* Messages 列表 */}
-      <div class="term-msgs-hdr">Messages [106/143]</div>
-      <div class="term-msg-cols">
-        <span style="min-width:6.5rem">HH:MM:SS</span>
-        <span style="min-width:7.5rem">Model</span>
-        <span style="min-width:4rem">Tokens</span>
-        <span style="min-width:4.5rem">Cost ↓</span>
-        <span>Prompt</span>
+      {/* ── Screen 2: Sessions ── */}
+      <div id="ts-sessions" class="term-screen">
+        <div class="term-section-hdr">SESSION DETAIL</div>
+        <div class="term-info" style="color:hsl(210 20% 72%)">
+          Window: 2026-04-08 23:00 → 00:50&nbsp;
+          <span class="t-dim">(1h 50m)  Dir: ~/backend</span>
+        </div>
+        <div class="term-model">
+          <span class="t-ok">● Sonnet 4.6</span>
+          <span class="t-dim">  10.8M</span>
+          <span class="t-ok">  $4.4332</span>
+          <span class="t-dim">  100.0%  (143 msgs)</span>
+        </div>
+
+        <div class="term-chart-wrap">
+          <div class="term-chart-label">Cost over time</div>
+          <div class="term-chart">
+            {bars.map((b) => (
+              <span class={`chart-bar bar-${b.t}`} style={`height:${b.h}px`} />
+            ))}
+          </div>
+          <div class="term-chart-footer">peak $0.4306 &nbsp;|&nbsp; 46s/col &nbsp;|&nbsp; 143 msgs</div>
+        </div>
+
+        <div class="term-msgs-hdr">Messages [106/143]</div>
+        <div class="term-msg-row">
+          <span class="t-dim" style="min-width:6.2rem">23:51:22</span>
+          <span class="t-out" style="min-width:7rem">claude-sonnet..</span>
+          <span class="t-dim" style="min-width:3.8rem">82.5k</span>
+          <span class="t-ok">$0.0265</span>
+        </div>
+        <div class="term-msg-row">
+          <span class="t-dim" style="min-width:6.2rem">00:15:05</span>
+          <span class="t-out" style="min-width:7rem">claude-sonnet..</span>
+          <span class="t-dim" style="min-width:3.8rem">78.5k</span>
+          <span class="t-ok">$0.0263</span>
+        </div>
+        <div class="term-msg-row sel">
+          <span style="color:var(--primary);min-width:0.8rem">▶</span>
+          <span class="t-dim" style="min-width:5.4rem">23:59:37</span>
+          <span class="t-out" style="min-width:7rem">claude-sonnet..</span>
+          <span class="t-dim" style="min-width:3.8rem">55.0k</span>
+          <span class="t-ok">$0.0213</span>
+        </div>
+
+        {/* 提示：可进入 session 详情 */}
+        <div class="term-hint">
+          <span class="term-hint-key">↵</span>
+          <span class="t-dim">open session detail — messages, sourcing &amp; cost breakdown</span>
+        </div>
       </div>
-      <div class="term-msg-row">
-        <span class="t-dim" style="min-width:6.5rem">23:51:22</span>
-        <span class="t-out" style="min-width:7.5rem">claude-sonnet..</span>
-        <span class="t-dim" style="min-width:4rem">82.5k</span>
-        <span class="t-ok" style="min-width:4.5rem">$0.0265</span>
-        <span class="t-dim">0.6% (no prompt)</span>
-      </div>
-      <div class="term-msg-row">
-        <span class="t-dim" style="min-width:6.5rem">00:15:05</span>
-        <span class="t-out" style="min-width:7.5rem">claude-sonnet..</span>
-        <span class="t-dim" style="min-width:4rem">78.5k</span>
-        <span class="t-ok" style="min-width:4.5rem">$0.0263</span>
-        <span class="t-dim">0.6% (no prompt)</span>
-      </div>
-      <div class="term-msg-row">
-        <span class="t-dim" style="min-width:6.5rem">00:09:58</span>
-        <span class="t-out" style="min-width:7.5rem">claude-sonnet..</span>
-        <span class="t-dim" style="min-width:4rem">74.0k</span>
-        <span class="t-ok" style="min-width:4.5rem">$0.0260</span>
-        <span class="t-dim">0.6% bangwoda tag</span>
-      </div>
-      <div class="term-msg-row sel">
-        <span style="color:var(--primary);min-width:0.8rem">▶</span>
-        <span class="t-dim" style="min-width:5.7rem">23:59:37</span>
-        <span class="t-out" style="min-width:7.5rem">claude-sonnet..</span>
-        <span class="t-dim" style="min-width:4rem">55.0k</span>
-        <span class="t-ok" style="min-width:4.5rem">$0.0213</span>
+
+      {/* ── Screen 3: Daily ── */}
+      <div id="ts-daily" class="term-screen">
+        <div class="term-section-hdr">DAILY USAGE — April 2026</div>
+
+        <div class="term-cal">
+          <div class="term-cal-hdr">
+            {['Mo','Tu','We','Th','Fr','Sa','Su'].map((d) => (
+              <span class="cal-hdr-cell">{d}</span>
+            ))}
+          </div>
+          {calWeeks.map((week, wi) => (
+            <div class="term-cal-week">
+              {week.map((intensity, di) => (
+                <div class={`cal-day d-${intensity}${wi === 4 && di === 1 ? ' d-today' : ''}`} />
+              ))}
+            </div>
+          ))}
+          <div class="term-cal-footer">
+            <span class="t-ok">Today $4.43</span>
+            <span class="t-dim"> | Peak Apr 7</span>
+            <span class="t-hi"> $8.21</span>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid hsl(215 19% 20%);margin:0.25rem 0" />
+        <div class="term-info" style="display:flex;gap:1.5rem;padding-top:0.2rem">
+          <span class="t-dim">Today <span class="t-out">12 sessions</span></span>
+          <span class="t-dim">Month <span class="t-out">847 sessions</span></span>
+        </div>
+
+        <div class="term-hint">
+          <span class="term-hint-key">3</span>
+          <span class="t-dim">switch to daily view</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
+            <span class="cal-day d-lo" style="width:8px;display:inline-block" />
+            <span class="cal-day d-md" style="width:8px;display:inline-block" />
+            <span class="cal-day d-hi" style="width:8px;display:inline-block" />
+            <span class="cal-day d-pk" style="width:8px;display:inline-block" />
+            <span class="t-dim" style="font-size:0.58rem">cost</span>
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -798,11 +996,13 @@ export const LeaderboardPage = ({ rows, period }: LeaderboardPageProps) => (
             </span>
           </p>
           <div class="hero-actions">
-            <a class="btn-primary" href="https://www.npmjs.com/package/@a2d2/claude-top"
-               target="_blank" rel="noopener">
-              <span data-lang="en">$ Install CLI</span>
-              <span data-lang="zh">$ 安装工具</span>
-            </a>
+            <button class="btn-primary btn-copy"
+                    onclick="copyCmd(this,'npx @a2d2/claude-top')">
+              <span data-lang="en">$ npx @a2d2/claude-top</span>
+              <span data-lang="zh">$ npx @a2d2/claude-top</span>
+              <span class="btn-copy-hint" data-lang="en">click to copy</span>
+              <span class="btn-copy-hint" data-lang="zh">点击复制</span>
+            </button>
             <a class="btn-ghost" href="https://github.com/a2d2-dev/claude-top"
                target="_blank" rel="noopener">
               <GithubIcon /> GitHub
@@ -908,11 +1108,11 @@ export const LeaderboardPage = ({ rows, period }: LeaderboardPageProps) => (
             </span>
           </p>
           <div class="cta-btns">
-            <a class="btn-primary" href="https://www.npmjs.com/package/@a2d2/claude-top"
-               target="_blank" rel="noopener">
-              <span data-lang="en">Install Now →</span>
-              <span data-lang="zh">立即安装 →</span>
-            </a>
+            <button class="btn-primary btn-copy"
+                    onclick="copyCmd(this,'npx @a2d2/claude-top')">
+              $ npx @a2d2/claude-top
+              <span class="btn-copy-hint">click to copy</span>
+            </button>
             <a class="btn-ghost" href="https://github.com/a2d2-dev/claude-top"
                target="_blank" rel="noopener">
               <GithubIcon /> GitHub
