@@ -22,7 +22,7 @@ func main() {
 	}
 
 	blocks := core.BuildSessionBlocks(entries)
-	m := ui.NewModel("pro", dataPath)
+	m := ui.NewModel("pro", dataPath, "claude", "")
 
 	// Inject loaded data directly for preview (bypasses bubbletea).
 	_ = blocks

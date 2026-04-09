@@ -19,6 +19,8 @@ interface UploadPayload {
   period: string;
   device_id: string;
   device_name?: string;
+  /** Data origin: "claude" or "codex". Defaults to "claude" for backward compat. */
+  source?: string;
   total_cost_usd: number;
   total_tokens: number;
   input_tokens: number;
@@ -62,14 +64,17 @@ uploadRoutes.post('/upload', async (c) => {
 
   const githubId = parseInt(claims.sub, 10);
 
-  // Upsert upload record. Repeated uploads for the same device+period overwrite.
+  // Normalize source field — default to "claude" for backward compat.
+  const source: 'claude' | 'codex' = body.source === 'codex' ? 'codex' : 'claude';
+
+  // Upsert upload record. Repeated uploads for the same device+period+source overwrite.
   await c.env.DB.prepare(
     `INSERT INTO uploads
-      (github_id, device_id, period, total_cost_usd, total_tokens,
+      (github_id, device_id, period, source, total_cost_usd, total_tokens,
        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
        session_count, model_breakdown)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (device_id, period)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (device_id, period, source)
      DO UPDATE SET
        github_id          = excluded.github_id,
        total_cost_usd     = excluded.total_cost_usd,
@@ -86,6 +91,7 @@ uploadRoutes.post('/upload', async (c) => {
       githubId,
       body.device_id,
       body.period,
+      source,
       body.total_cost_usd,
       body.total_tokens,
       body.input_tokens,
@@ -106,13 +112,13 @@ uploadRoutes.post('/upload', async (c) => {
       .run();
   }
 
-  // Compute this user's rank for the period (by aggregated cost across devices).
-  const rank = await computeUserRank(c.env.DB, githubId, body.period);
-  const totalUsers = await countUsers(c.env.DB, body.period);
+  // Compute this user's rank for the period and source (by aggregated cost across devices).
+  const rank = await computeUserRank(c.env.DB, githubId, body.period, source);
+  const totalUsers = await countUsers(c.env.DB, body.period, source);
 
   // Refresh KV leaderboard cache in the background (don't await).
   c.executionCtx.waitUntil(
-    refreshLeaderboardCache(c.env.DB, c.env.LEADERBOARD, body.period),
+    refreshLeaderboardCache(c.env.DB, c.env.LEADERBOARD, body.period, source),
   );
 
   return c.json({
@@ -123,38 +129,52 @@ uploadRoutes.post('/upload', async (c) => {
 });
 
 /**
- * computeUserRank returns the rank (1-based) of a github_id for a given period.
+ * computeUserRank returns the rank (1-based) of a github_id for a given period and source.
  * Rank is determined by descending aggregated total_cost_usd across all devices.
+ *
+ * @param db       - D1 database binding
+ * @param githubId - Numeric GitHub user ID
+ * @param period   - YYYY-MM period string
+ * @param source   - "claude" or "codex"
  */
 async function computeUserRank(
   db: D1Database,
   githubId: number,
   period: string,
+  source: 'claude' | 'codex',
 ): Promise<number> {
   const result = await db
     .prepare(
       `WITH totals AS (
          SELECT github_id, SUM(total_cost_usd) AS cost
          FROM uploads
-         WHERE period = ?
+         WHERE period = ? AND source = ?
          GROUP BY github_id
        )
        SELECT COUNT(*) + 1 AS rank
        FROM totals
        WHERE cost > (SELECT cost FROM totals WHERE github_id = ?)`,
     )
-    .bind(period, githubId)
+    .bind(period, source, githubId)
     .first<{ rank: number }>();
   return result?.rank ?? 1;
 }
 
 /**
- * countUsers returns the number of distinct github_ids with uploads for period.
+ * countUsers returns the number of distinct github_ids with uploads for period and source.
+ *
+ * @param db     - D1 database binding
+ * @param period - YYYY-MM period string
+ * @param source - "claude" or "codex"
  */
-async function countUsers(db: D1Database, period: string): Promise<number> {
+async function countUsers(
+  db: D1Database,
+  period: string,
+  source: 'claude' | 'codex',
+): Promise<number> {
   const result = await db
-    .prepare(`SELECT COUNT(DISTINCT github_id) AS cnt FROM uploads WHERE period = ?`)
-    .bind(period)
+    .prepare(`SELECT COUNT(DISTINCT github_id) AS cnt FROM uploads WHERE period = ? AND source = ?`)
+    .bind(period, source)
     .first<{ cnt: number }>();
   return result?.cnt ?? 0;
 }

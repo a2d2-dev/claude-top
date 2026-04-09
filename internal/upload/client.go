@@ -20,6 +20,8 @@ type UploadPayload struct {
 	DeviceID string `json:"device_id"`
 	// DeviceName is the optional human-readable device label.
 	DeviceName string `json:"device_name"`
+	// Source identifies the data origin: "claude" or "codex".
+	Source string `json:"source"`
 	// TotalCostUSD is the total spend for the period on this device.
 	TotalCostUSD float64 `json:"total_cost_usd"`
 	// TotalTokens is the sum of all token types.
@@ -52,15 +54,20 @@ type UploadResponse struct {
 // It requires a valid JWT (from auth.LoadAuth) and a known device identity.
 //
 // Parameters:
-//   - ctx: request context
-//   - jwt: the bearer token issued by /auth/verify
+//   - ctx:    request context
+//   - jwt:    the bearer token issued by /auth/verify
 //   - device: the device identity from auth.EnsureDevice
-//   - stats: the monthly aggregated stats from AggregateCurrentMonth
-func Upload(ctx context.Context, jwt string, device *auth.DeviceInfo, stats *MonthlyStats) (*UploadResponse, error) {
+//   - stats:  the monthly aggregated stats from AggregateCurrentMonth
+//   - source: "claude" or "codex" — identifies which leaderboard to target
+func Upload(ctx context.Context, jwt string, device *auth.DeviceInfo, stats *MonthlyStats, source string) (*UploadResponse, error) {
+	if source == "" {
+		source = "claude"
+	}
 	payload := UploadPayload{
 		Period:           stats.Period,
 		DeviceID:         device.DeviceID,
 		DeviceName:       device.DeviceName,
+		Source:           source,
 		TotalCostUSD:     stats.TotalCostUSD,
 		TotalTokens:      stats.TotalTokens(),
 		InputTokens:      stats.InputTokens,

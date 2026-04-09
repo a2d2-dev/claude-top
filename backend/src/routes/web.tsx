@@ -13,9 +13,9 @@
 import { Hono } from 'hono';
 import { html } from 'hono/html';
 import type { Bindings } from '../index';
-import { buildLeaderboard, queryUserStats } from './leaderboard';
+import { buildLeaderboard, queryUserStats, type LeaderboardEntry } from './leaderboard';
 import { LeaderboardPage } from '../pages/LeaderboardPage';
-import { UserPage } from '../pages/UserPage';
+import { UserPage, type MultiSourceUserData } from '../pages/UserPage';
 
 export const webRoutes = new Hono<{ Bindings: Bindings }>();
 
@@ -42,16 +42,37 @@ function escapeHtml(str: string): string {
 
 // ── 排行榜页 ──────────────────────────────────────────────────
 
+/**
+ * Validates the ?source= query parameter.
+ * Returns 'claude' for missing/invalid values (backward compatibility).
+ * 'all' is allowed as a placeholder for the future combined leaderboard.
+ */
+function normalizePageSource(raw: string | undefined): 'claude' | 'codex' | 'all' {
+  if (raw === 'codex') return 'codex';
+  if (raw === 'all') return 'all';
+  return 'claude';
+}
+
 webRoutes.get('/', async (c) => {
   const period = c.req.query('period') ?? currentPeriod();
-  const rows = await buildLeaderboard(c.env.DB, period);
-  return c.html(html`<!DOCTYPE html>${(<LeaderboardPage rows={rows} period={period} defaultTab="about" />)}`);
+  const source = normalizePageSource(c.req.query('source'));
+  // For the landing page default to 'about' tab; load claude data for the leaderboard panel.
+  const rows = await buildLeaderboard(c.env.DB, period, source === 'all' ? 'claude' : source);
+  return c.html(html`<!DOCTYPE html>${(
+    <LeaderboardPage rows={rows} period={period} defaultTab="about" source={source} />
+  )}`);
 });
 
 webRoutes.get('/leaderboard', async (c) => {
   const period = c.req.query('period') ?? currentPeriod();
-  const rows = await buildLeaderboard(c.env.DB, period);
-  return c.html(html`<!DOCTYPE html>${(<LeaderboardPage rows={rows} period={period} defaultTab="leaderboard" />)}`);
+  const source = normalizePageSource(c.req.query('source'));
+  // Fetch rows for the requested source; 'all' shows placeholder (no DB query needed).
+  const rows: LeaderboardEntry[] = source === 'all'
+    ? []
+    : await buildLeaderboard(c.env.DB, period, source);
+  return c.html(html`<!DOCTYPE html>${(
+    <LeaderboardPage rows={rows} period={period} defaultTab="leaderboard" source={source} />
+  )}`);
 });
 
 // ── 用户统计页 ────────────────────────────────────────────────
@@ -60,16 +81,33 @@ webRoutes.get('/u/:login', async (c) => {
   const login = c.req.param('login');
   const period = currentPeriod();
 
-  const user = await queryUserStats(c.env.DB, login, period);
-  if (!user) {
+  // Fetch stats for each source independently.
+  const [claudeStats, codexStats] = await Promise.all([
+    queryUserStats(c.env.DB, login, period, 'claude'),
+    queryUserStats(c.env.DB, login, period, 'codex'),
+  ]);
+
+  if (!claudeStats && !codexStats) {
     return c.html('<h1>用户不存在或暂无数据</h1>', 404);
   }
+
+  // Use avatar from whichever source has data.
+  const avatarUrl = claudeStats?.avatar_url ?? codexStats?.avatar_url ?? '';
+  const totalCostUsd = (claudeStats?.total_cost_usd ?? 0) + (codexStats?.total_cost_usd ?? 0);
+
+  const userData: MultiSourceUserData = {
+    github_login: login,
+    avatar_url: avatarUrl,
+    total_cost_usd: totalCostUsd,
+    claude: claudeStats ?? null,
+    codex: codexStats ?? null,
+  };
 
   const origin = new URL(c.req.url).origin;
   const ogImg = `${origin}/og/${encodeURIComponent(login)}`;
   const shareUrl = `${origin}/u/${encodeURIComponent(login)}`;
 
-  return c.html(html`<!DOCTYPE html>${(<UserPage user={user} period={period} ogImg={ogImg} shareUrl={shareUrl} />)}`);
+  return c.html(html`<!DOCTYPE html>${(<UserPage user={userData} period={period} ogImg={ogImg} shareUrl={shareUrl} />)}`);
 });
 
 // ── OG 图片（SVG 字符串，保留手动转义）────────────────────────
@@ -78,8 +116,14 @@ webRoutes.get('/og/:login', async (c) => {
   const login = c.req.param('login');
   const period = currentPeriod();
 
-  const stats = await queryUserStats(c.env.DB, login, period);
-  const user = stats ?? { rank: 0, total_cost_usd: 0, total_tokens: 0 };
+  // Combine both sources for OG image; show total cost and best rank.
+  const [claudeStats, codexStats] = await Promise.all([
+    queryUserStats(c.env.DB, login, period, 'claude'),
+    queryUserStats(c.env.DB, login, period, 'codex'),
+  ]);
+  const totalCostUsd = (claudeStats?.total_cost_usd ?? 0) + (codexStats?.total_cost_usd ?? 0);
+  const bestRank = claudeStats?.rank ?? codexStats?.rank ?? 0;
+  const user = { rank: bestRank, total_cost_usd: totalCostUsd, total_tokens: 0 };
 
   // SVG 文本内容需手动转义（不走 JSX 运行时）。
   const safeLogin = escapeHtml(login);

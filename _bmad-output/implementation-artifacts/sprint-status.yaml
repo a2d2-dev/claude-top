@@ -28,16 +28,16 @@ development_status:
   4-3-og-image-generation: done
   epic-4-retrospective: optional
 
-  epic-5: in-progress
+  epic-5: done
   5-1-codex-data-parsing-cache: done
   5-2-sessions-tab-multi-source: done
   5-3-overview-per-source-stats: done
   5-4-settings-panel: done
   epic-5-retrospective: optional
 
-  epic-6: backlog
-  6-1-backend-source-field: backlog
-  6-2-tui-multi-source-upload: backlog
-  6-3-dual-leaderboard-tab-url: backlog
-  6-4-personal-page-multi-source: backlog
+  epic-6: done
+  6-1-backend-source-field: done
+  6-2-tui-multi-source-upload: done
+  6-3-dual-leaderboard-tab-url: done
+  6-4-personal-page-multi-source: done
   epic-6-retrospective: optional

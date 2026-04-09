@@ -841,7 +841,13 @@ func (m Model) handleUploadKey() (tea.Model, tea.Cmd) {
 // upload confirmation dialog. Called after successful auth or on 'u' if
 // already authenticated.
 func (m Model) startUploadConfirm(info *auth.AuthInfo) (tea.Model, tea.Cmd) {
-	stats, err := upload.AggregateCurrentMonth(m.blocks)
+	// When source=all, aggregate combined stats for the confirm dialog.
+	// Actual uploads are split per-source in doUploadCmd.
+	aggregateSource := m.source
+	if aggregateSource == "all" {
+		aggregateSource = "all"
+	}
+	stats, err := upload.AggregateCurrentMonth(m.blocks, aggregateSource)
 	if err != nil {
 		m.uploadOverlay = uploadState{
 			phase:  uploadError,
@@ -872,7 +878,7 @@ func (m Model) handleUploadKey2(key string) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.uploadOverlay.phase = uploadInProgress
-			return m, doUploadCmd(info.JWT, m.uploadOverlay.stats)
+			return m, doUploadCmd(info.JWT, m.blocks, m.source)
 		case "esc", "n", "q":
 			m.uploadOverlay = uploadState{phase: uploadIdle}
 			return m, nil
@@ -908,20 +914,47 @@ func (m Model) handleUploadResult(msg uploadResultMsg) (tea.Model, tea.Cmd) {
 // ── Upload command ─────────────────────────────────────────────────────────────
 
 // doUploadCmd runs the upload HTTP call in the background.
-func doUploadCmd(jwt string, stats *upload.MonthlyStats) tea.Cmd {
+// When source="all", it uploads claude and codex data separately,
+// returning the combined rank from the claude upload (primary source).
+func doUploadCmd(jwt string, blocks []data.SessionBlock, modelSource string) tea.Cmd {
 	return func() tea.Msg {
 		device, err := auth.EnsureDevice()
 		if err != nil {
 			return uploadResultMsg{Err: fmt.Errorf("读取设备信息失败: %w", err)}
 		}
-		resp, err := upload.Upload(context.Background(), jwt, device, stats)
-		if err != nil {
-			return uploadResultMsg{Err: err}
+
+		ctx := context.Background()
+
+		// Determine which sources to upload.
+		sources := []string{modelSource}
+		if modelSource == "all" {
+			sources = []string{"claude", "codex"}
+		}
+
+		var lastResp *upload.UploadResponse
+		for _, src := range sources {
+			stats, aggErr := upload.AggregateCurrentMonth(blocks, src)
+			if aggErr != nil {
+				return uploadResultMsg{Err: fmt.Errorf("数据聚合失败 (%s): %w", src, aggErr)}
+			}
+			// Skip upload if there's no data for this source.
+			if stats.SessionCount == 0 && stats.TotalCostUSD == 0 {
+				continue
+			}
+			resp, uploadErr := upload.Upload(ctx, jwt, device, stats, src)
+			if uploadErr != nil {
+				return uploadResultMsg{Err: uploadErr}
+			}
+			lastResp = resp
+		}
+
+		if lastResp == nil {
+			return uploadResultMsg{Err: fmt.Errorf("当前月没有可上传的数据")}
 		}
 		return uploadResultMsg{
-			Rank:     resp.Rank,
-			Total:    resp.TotalUsers,
-			ShareURL: resp.ShareURL,
+			Rank:     lastResp.Rank,
+			Total:    lastResp.TotalUsers,
+			ShareURL: lastResp.ShareURL,
 		}
 	}
 }

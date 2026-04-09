@@ -15,13 +15,15 @@ CREATE TABLE IF NOT EXISTS devices (
 
 CREATE INDEX IF NOT EXISTS idx_devices_github_id ON devices (github_id);
 
--- uploads: one row per (device_id, period). Upsert on conflict.
+-- uploads: one row per (device_id, period, source). Upsert on conflict.
 -- Aggregation across devices is done at query time by summing over github_id.
+-- source: "claude" or "codex" — identifies the data origin tool.
 CREATE TABLE IF NOT EXISTS uploads (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   github_id          INTEGER NOT NULL,
   device_id          TEXT    NOT NULL,
   period             TEXT    NOT NULL,  -- YYYY-MM
+  source             TEXT    NOT NULL DEFAULT 'claude',  -- "claude" or "codex"
   total_cost_usd     REAL    NOT NULL DEFAULT 0,
   total_tokens       INTEGER NOT NULL DEFAULT 0,
   input_tokens       INTEGER NOT NULL DEFAULT 0,
@@ -31,8 +33,10 @@ CREATE TABLE IF NOT EXISTS uploads (
   session_count      INTEGER NOT NULL DEFAULT 0,
   model_breakdown    TEXT    NOT NULL DEFAULT '{}',  -- JSON
   uploaded_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (device_id, period)
+  UNIQUE (device_id, period, source)
 );
 
-CREATE INDEX IF NOT EXISTS idx_uploads_github_period ON uploads (github_id, period);
-CREATE INDEX IF NOT EXISTS idx_uploads_period        ON uploads (period);
+CREATE INDEX IF NOT EXISTS idx_uploads_github_period        ON uploads (github_id, period);
+CREATE INDEX IF NOT EXISTS idx_uploads_period               ON uploads (period);
+CREATE INDEX IF NOT EXISTS idx_uploads_period_source        ON uploads (period, source);
+CREATE INDEX IF NOT EXISTS idx_uploads_github_period_source ON uploads (github_id, period, source);

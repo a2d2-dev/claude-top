@@ -51,7 +51,7 @@ func TestAggregateCurrentMonth(t *testing.T) {
 		},
 	}
 
-	stats, err := AggregateCurrentMonth(blocks)
+	stats, err := AggregateCurrentMonth(blocks, "all")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,18 +74,69 @@ func TestAggregateCurrentMonth(t *testing.T) {
 }
 
 func TestAggregateCurrentMonthNilError(t *testing.T) {
-	_, err := AggregateCurrentMonth(nil)
+	_, err := AggregateCurrentMonth(nil, "all")
 	if err == nil {
 		t.Error("expected error for nil blocks")
 	}
 }
 
 func TestAggregateCurrentMonthEmpty(t *testing.T) {
-	stats, err := AggregateCurrentMonth([]data.SessionBlock{})
+	stats, err := AggregateCurrentMonth([]data.SessionBlock{}, "all")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if stats.TotalCostUSD != 0 || stats.SessionCount != 0 {
 		t.Error("expected zero stats for empty blocks")
+	}
+}
+
+// TestAggregateCurrentMonthSourceFilter verifies that source filtering works.
+func TestAggregateCurrentMonthSourceFilter(t *testing.T) {
+	now := time.Now()
+	blocks := []data.SessionBlock{
+		{
+			StartTime: now.Add(-2 * time.Hour),
+			Source:    "claude",
+			CostUSD:   1.00,
+			TokenCounts: data.TokenCounts{InputTokens: 100},
+			PerModelStats: map[string]*data.ModelStats{},
+		},
+		{
+			StartTime: now.Add(-1 * time.Hour),
+			Source:    "codex",
+			CostUSD:   2.00,
+			TokenCounts: data.TokenCounts{InputTokens: 200},
+			PerModelStats: map[string]*data.ModelStats{},
+		},
+	}
+
+	// Filter to claude only.
+	claudeStats, err := AggregateCurrentMonth(blocks, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claudeStats.TotalCostUSD != 1.00 {
+		t.Errorf("claude filter: TotalCostUSD = %.2f, want 1.00", claudeStats.TotalCostUSD)
+	}
+	if claudeStats.SessionCount != 1 {
+		t.Errorf("claude filter: SessionCount = %d, want 1", claudeStats.SessionCount)
+	}
+
+	// Filter to codex only.
+	codexStats, err := AggregateCurrentMonth(blocks, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codexStats.TotalCostUSD != 2.00 {
+		t.Errorf("codex filter: TotalCostUSD = %.2f, want 2.00", codexStats.TotalCostUSD)
+	}
+
+	// "all" includes both.
+	allStats, err := AggregateCurrentMonth(blocks, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allStats.TotalCostUSD != 3.00 {
+		t.Errorf("all filter: TotalCostUSD = %.2f, want 3.00", allStats.TotalCostUSD)
 	}
 }

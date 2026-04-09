@@ -53,8 +53,11 @@ type ModelMonthlyStats struct {
 // AggregateCurrentMonth computes MonthlyStats for the current calendar month
 // from the provided session blocks. Gap and active blocks are excluded.
 //
+// source filters which blocks to include: "all", "claude", or "codex".
+// "" and "all" include all blocks regardless of source.
+//
 // Returns an error if blocks is nil; an empty MonthlyStats is valid (zero usage).
-func AggregateCurrentMonth(blocks []data.SessionBlock) (*MonthlyStats, error) {
+func AggregateCurrentMonth(blocks []data.SessionBlock, source string) (*MonthlyStats, error) {
 	if blocks == nil {
 		return nil, fmt.Errorf("blocks must not be nil")
 	}
@@ -77,6 +80,10 @@ func AggregateCurrentMonth(blocks []data.SessionBlock) (*MonthlyStats, error) {
 		}
 		// Include only blocks whose start time falls in the current month.
 		if b.StartTime.Before(monthStart) || !b.StartTime.Before(monthEnd) {
+			continue
+		}
+		// Filter by source when specified.
+		if source != "" && source != "all" && b.Source != source {
 			continue
 		}
 
