@@ -1,8 +1,8 @@
-# claude-monitor
+# claude-top
 
 Terminal UI for monitoring [Claude Code](https://claude.ai/code) token and cost usage in real time.
 
-![claude-monitor screenshot](https://github.com/a2d2-dev/claude-top/releases/download/v0.1.1/screenshot.png)
+![claude-top screenshot](https://github.com/a2d2-dev/claude-top/releases/download/v0.1.1/screenshot.png)
 
 ## Screenshots
 
@@ -23,14 +23,14 @@ Terminal UI for monitoring [Claude Code](https://claude.ai/code) token and cost 
 ### npx (no install required)
 
 ```bash
-npx @a2d2/claude-monitor@latest
+npx @a2d2/claude-top@latest
 ```
 
 ### npm global
 
 ```bash
-npm install -g @a2d2/claude-monitor
-claude-monitor
+npm install -g @a2d2/claude-top
+claude-top
 ```
 
 ### go install
@@ -45,22 +45,22 @@ Grab the binary for your platform from the [Releases page](https://github.com/a2
 
 | Platform | File |
 |----------|------|
-| macOS Apple Silicon | `claude-monitor-darwin-arm64` |
-| macOS Intel | `claude-monitor-darwin-x86_64` |
-| Linux x64 | `claude-monitor-linux-x86_64` |
-| Linux ARM64 | `claude-monitor-linux-arm64` |
-| Windows x64 | `claude-monitor-windows-x86_64.exe` |
+| macOS Apple Silicon | `claude-top-darwin-arm64` |
+| macOS Intel | `claude-top-darwin-x86_64` |
+| Linux x64 | `claude-top-linux-x86_64` |
+| Linux ARM64 | `claude-top-linux-arm64` |
+| Windows x64 | `claude-top-windows-x86_64.exe` |
 
 ```bash
 # macOS / Linux
-chmod +x claude-monitor-*
-./claude-monitor-darwin-arm64
+chmod +x claude-top-*
+./claude-top-darwin-arm64
 ```
 
 ## Usage
 
 ```
-claude-monitor [--plan <plan>] [--data-path <path>]
+claude-top [--plan <plan>] [--data-path <path>]
 
 Flags:
   --plan        Subscription plan: pro, max5, max20  (default: pro)
