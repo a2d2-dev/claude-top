@@ -202,6 +202,210 @@ func TestLoadCodexEntries_WithData(t *testing.T) {
 	}
 }
 
+// TestParseCodexFile_NullInfo verifies that a token_count event with null info is skipped.
+// This is a real-world occurrence: the first token_count in a session often has info=null.
+func TestParseCodexFile_NullInfo(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-null"}}`,
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"turn_context","payload":{"model":"gpt-5-codex"}}`,
+		// null info — should be silently skipped
+		`{"timestamp":"2026-04-10T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":null}}}`,
+		// non-null info — should produce one entry
+		`{"timestamp":"2026-04-10T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":42,"cached_input_tokens":0,"output_tokens":7,"reasoning_output_tokens":0}},"rate_limits":{"primary":null}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (null info skipped), got %d", len(entries))
+	}
+	if entries[0].InputTokens != 42 {
+		t.Errorf("InputTokens: want 42, got %d", entries[0].InputTokens)
+	}
+}
+
+// TestParseCodexFile_AllZeroTokens verifies that token_count events with all-zero
+// token counts are skipped (they represent empty/aborted turns).
+func TestParseCodexFile_AllZeroTokens(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-zero"}}`,
+		// all zeros — should be skipped
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}}}`,
+		// non-zero — should produce one entry
+		`{"timestamp":"2026-04-10T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (all-zero skipped), got %d", len(entries))
+	}
+}
+
+// TestParseCodexFile_NoTokenEvents verifies that a file with no token_count events
+// returns an empty slice without error.
+func TestParseCodexFile_NoTokenEvents(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-notokens"}}`,
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"turn_context","payload":{"model":"gpt-5-codex"}}`,
+		`{"timestamp":"2026-04-10T00:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"hi","images":[]}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+// TestParseCodexFile_TimestampParsed verifies that the top-level ISO 8601 timestamp
+// is parsed correctly and stored as a UTC time on the entry.
+func TestParseCodexFile_TimestampParsed(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-03-15T10:30:00.500Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	want := time.Date(2026, 3, 15, 10, 30, 0, 500_000_000, time.UTC)
+	if !entries[0].Timestamp.Equal(want) {
+		t.Errorf("Timestamp: want %v, got %v", want, entries[0].Timestamp)
+	}
+}
+
+// TestParseCodexFile_SessionIDFallback verifies that the file basename is used as
+// the session ID when no session_meta event is present.
+func TestParseCodexFile_SessionIDFallback(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		// No session_meta
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	wantID := filepath.Base(f)
+	if entries[0].SessionID != wantID {
+		t.Errorf("SessionID fallback: want %q, got %q", wantID, entries[0].SessionID)
+	}
+}
+
+// TestParseCodexFile_CWDFromPath verifies that the CWD field is set to the
+// directory containing the JSONL file.
+func TestParseCodexFile_CWDFromPath(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	want := filepath.Dir(f)
+	if entries[0].CWD != want {
+		t.Errorf("CWD: want %q, got %q", want, entries[0].CWD)
+	}
+}
+
+// TestParseCodexFile_MalformedLines verifies that malformed JSON lines are skipped
+// without returning an error, and valid lines are still parsed.
+func TestParseCodexFile_MalformedLines(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-malformed"}}`,
+		`not valid json {{{`,
+		`{"broken":`,
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (malformed lines skipped), got %d", len(entries))
+	}
+}
+
+// TestParseCodexFile_RealWorldFormat verifies parsing of the full real-world event
+// structure including extra fields (rate_limits, total_token_usage, model_context_window).
+func TestParseCodexFile_RealWorldFormat(t *testing.T) {
+	// This mirrors what Codex CLI actually writes to disk.
+	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-09T14:08:39.172Z","type":"session_meta","payload":{"id":"019d7292-d6d4-71d3-82f5-284cdaea1043","cwd":"/Users/user/project","originator":"codex_cli_rs","cli_version":"0.50.0"}}`,
+		`{"timestamp":"2026-04-09T14:08:42.223Z","type":"event_msg","payload":{"type":"user_message","message":"hello","images":[]}}`,
+		`{"timestamp":"2026-04-09T14:08:43.000Z","type":"turn_context","payload":{"cwd":"/","model":"gpt-5.1-codex-mini","effort":"low","summary":"auto"}}`,
+		`{"timestamp":"2026-04-09T15:25:11.657Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":6465,"cached_input_tokens":0,"output_tokens":52,"reasoning_output_tokens":0,"total_tokens":6517},"last_token_usage":{"input_tokens":6465,"cached_input_tokens":0,"output_tokens":52,"reasoning_output_tokens":0,"total_tokens":6517},"model_context_window":258400},"rate_limits":{"primary":null,"secondary":null}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	e := entries[0]
+	if e.SessionID != "019d7292-d6d4-71d3-82f5-284cdaea1043" {
+		t.Errorf("SessionID: want '019d7292-...', got %q", e.SessionID)
+	}
+	if e.Model != "gpt-5.1-codex-mini" {
+		t.Errorf("Model: want 'gpt-5.1-codex-mini', got %q", e.Model)
+	}
+	if e.InputTokens != 6465 {
+		t.Errorf("InputTokens: want 6465, got %d", e.InputTokens)
+	}
+	if e.OutputTokens != 52 {
+		t.Errorf("OutputTokens: want 52, got %d", e.OutputTokens)
+	}
+	if e.UserPrompt != "hello" {
+		t.Errorf("UserPrompt: want 'hello', got %q", e.UserPrompt)
+	}
+	if e.Source != "codex" {
+		t.Errorf("Source: want 'codex', got %q", e.Source)
+	}
+}
+
+// writeCodexFile creates a temp JSONL file with the given lines and returns the path.
+// It creates YYYY/MM/DD directory structure within t.TempDir().
+func writeCodexFile(t *testing.T, lines []string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "2026", "04", "10")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "test-session.jsonl")
+	content := ""
+	for _, l := range lines {
+		content += l + "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestLoadAllEntries_Sources verifies that LoadAllEntries correctly filters by source.
 func TestLoadAllEntries_Sources(t *testing.T) {
 	// Create a temp codex directory with one entry.

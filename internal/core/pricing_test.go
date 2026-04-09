@@ -112,3 +112,46 @@ func TestPricingForModel_OpenAI(t *testing.T) {
 		t.Errorf("claude-opus-4-6 Input: want 5.00, got %v", opusPricing.Input)
 	}
 }
+
+// TestPricingForModel_ActualCodexModelNames verifies that the model names actually
+// written by Codex CLI (gpt-5-codex, gpt-5.1-codex-mini) map to non-zero pricing.
+func TestPricingForModel_ActualCodexModelNames(t *testing.T) {
+	cases := []struct {
+		model     string
+		wantMini  bool // true = mini tier, false = full tier
+	}{
+		{"gpt-5.1-codex-mini", true},
+		{"gpt-5-codex", false},
+		{"codex-mini-latest", true},
+		{"codex-latest", false},
+		{"gpt-4o-mini", true},    // contains "mini" and "gpt"
+		{"gpt-4o", false},        // contains "gpt", no "mini"
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			p := pricingForModel(tc.model)
+			if p.Input == 0 {
+				t.Errorf("model %q: Input pricing is zero", tc.model)
+			}
+			if p.Output == 0 {
+				t.Errorf("model %q: Output pricing is zero", tc.model)
+			}
+			if tc.wantMini {
+				if p.Input != 1.50 {
+					t.Errorf("model %q (mini): Input want 1.50, got %v", tc.model, p.Input)
+				}
+				if p.Output != 6.00 {
+					t.Errorf("model %q (mini): Output want 6.00, got %v", tc.model, p.Output)
+				}
+			} else {
+				if p.Input != 3.00 {
+					t.Errorf("model %q (full): Input want 3.00, got %v", tc.model, p.Input)
+				}
+				if p.Output != 12.00 {
+					t.Errorf("model %q (full): Output want 12.00, got %v", tc.model, p.Output)
+				}
+			}
+		})
+	}
+}
