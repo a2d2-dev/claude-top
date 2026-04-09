@@ -370,6 +370,50 @@ func TestParseCodexFile_MalformedLines(t *testing.T) {
 	}
 }
 
+// TestLoadCodexEntries_CWDSurvivedCacheRoundTrip verifies that the CWD from
+// session_meta is stored in the cache and correctly retrieved on a second load.
+// This guards against silent regressions where the cache stores wrong values.
+func TestLoadCodexEntries_CWDSurvivedCacheRoundTrip(t *testing.T) {
+	// Create a temp Codex directory with one session file containing a known CWD.
+	codexDir := t.TempDir()
+	sessionDir := filepath.Join(codexDir, "2026", "04", "10")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"timestamp":"2026-04-10T10:00:00Z","type":"session_meta","payload":{"id":"sess-rtt","cwd":"/Users/user/myproject"}}
+{"timestamp":"2026-04-10T10:00:01Z","type":"turn_context","payload":{"model":"gpt-5-codex"}}
+{"timestamp":"2026-04-10T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}
+`
+	filePath := filepath.Join(sessionDir, "session.jsonl")
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First load: parses from JSONL and writes cache.
+	entries1, err := LoadCodexEntries(codexDir)
+	if err != nil {
+		t.Fatalf("first LoadCodexEntries: %v", err)
+	}
+	if len(entries1) != 1 {
+		t.Fatalf("first load: expected 1 entry, got %d", len(entries1))
+	}
+	if entries1[0].CWD != "/Users/user/myproject" {
+		t.Errorf("first load CWD: want '/Users/user/myproject', got %q", entries1[0].CWD)
+	}
+
+	// Second load: served from cache (file mod time unchanged).
+	entries2, err := LoadCodexEntries(codexDir)
+	if err != nil {
+		t.Fatalf("second LoadCodexEntries: %v", err)
+	}
+	if len(entries2) != 1 {
+		t.Fatalf("second load: expected 1 entry, got %d", len(entries2))
+	}
+	if entries2[0].CWD != "/Users/user/myproject" {
+		t.Errorf("cache round-trip CWD: want '/Users/user/myproject', got %q (stale cache bug)", entries2[0].CWD)
+	}
+}
+
 // TestParseCodexFile_RealWorldFormat verifies parsing of the full real-world event
 // structure including extra fields (rate_limits, total_token_usage, model_context_window).
 func TestParseCodexFile_RealWorldFormat(t *testing.T) {
