@@ -542,7 +542,6 @@ const pageScript = `
     var btn   = document.querySelector('[data-tab="' + id + '"]');
     if (panel) panel.classList.add('active');
     if (btn)   btn.classList.add('active');
-    try { sessionStorage.setItem('activeTab', id); } catch(e) {}
   }
 
   // ── 语言切换 ──
@@ -597,8 +596,6 @@ const pageScript = `
     var hash      = location.hash.replace('#', '');
     var validTabs = ['leaderboard', 'about'];
     var tab = validTabs.indexOf(hash) !== -1 ? hash : 'leaderboard';
-    try { tab = sessionStorage.getItem('activeTab') || tab; } catch(e) {}
-    if (hash && validTabs.indexOf(hash) !== -1) tab = hash;
     showTab(tab);
 
     // 终端轮播：先显示 overview，3.5 秒一循环
