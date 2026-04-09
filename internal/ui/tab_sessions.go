@@ -26,7 +26,14 @@ func renderSessions(m Model, height int) string {
 
 	rows := m.sessionRows()
 	innerW := m.width - 4
-	colW := histColWidths(innerW - 2) // -2 for prefix
+
+	// showSource is true when mixed mode (all or codex) so source prefix [C]/[X] is shown.
+	showSource := m.source != "claude"
+	prefixW := 2 // cursor prefix "▶ " or "  "
+	if showSource {
+		prefixW = 4 // "[C] " or "[X] " or "  ▶ "
+	}
+	colW := histColWidths(innerW - prefixW)
 
 	// ── Column header ─────────────────────────────────────────────────────────
 	colNames := []string{"Start", "Updated", "Msgs", "Tokens", "Cost", "Directory"}
@@ -42,7 +49,8 @@ func renderSessions(m Model, height int) string {
 		}
 		headerCols[i] = labelStyle.Width(colW[i]).Render(name + indicator)
 	}
-	header := "  " + strings.Join(headerCols, " ")
+	headerIndent := strings.Repeat(" ", prefixW)
+	header := headerIndent + strings.Join(headerCols, " ")
 	divider := mutedStyle.Render(strings.Repeat("─", min(innerW, m.width-6)))
 
 	// ── Visible rows ──────────────────────────────────────────────────────────
@@ -77,7 +85,7 @@ func renderSessions(m Model, height int) string {
 	for i, s := range visible {
 		rowIdx := scroll + i
 		isCursor := rowIdx == m.sessions.cursor
-		lines = append(lines, historyDataRow(s, colW, isCursor))
+		lines = append(lines, historyDataRow(s, colW, isCursor, showSource))
 	}
 
 	content := padToHeight(strings.Join(lines, "\n"), height-2)

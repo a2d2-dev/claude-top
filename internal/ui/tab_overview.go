@@ -57,6 +57,46 @@ func renderOverview(m Model, height int) string {
 		),
 	)
 
+	// ── Per-source breakdown (only when both sources have data) ────────────────
+	var (
+		claudeTokens, codexTokens     int
+		claudeCost, codexCost         float64
+		claudeBlocks, codexBlocks     int
+	)
+	for i := range m.blocks {
+		b := &m.blocks[i]
+		if b.IsGap {
+			continue
+		}
+		switch b.Source {
+		case "codex":
+			codexTokens += b.TokenCounts.TotalTokens()
+			codexCost += b.CostUSD
+			codexBlocks++
+		default: // "claude" or empty defaults to claude
+			claudeTokens += b.TokenCounts.TotalTokens()
+			claudeCost += b.CostUSD
+			claudeBlocks++
+		}
+	}
+	// Only show per-source rows when both sources have data.
+	if claudeBlocks > 0 && codexBlocks > 0 {
+		fixedLines = append(fixedLines,
+			fmt.Sprintf("  %s  %s %s   %s %s   %s %s",
+				mutedStyle.Render("● Claude Code "),
+				labelStyle.Render("Tokens:"), mutedStyle.Render(formatInt(claudeTokens)),
+				labelStyle.Render("Cost:"), mutedStyle.Render(fmt.Sprintf("$%.2f", claudeCost)),
+				labelStyle.Render("Sessions:"), mutedStyle.Render(fmt.Sprintf("%d", claudeBlocks)),
+			),
+			fmt.Sprintf("  %s  %s %s   %s %s   %s %s",
+				mutedStyle.Render("✦ Codex CLI   "),
+				labelStyle.Render("Tokens:"), mutedStyle.Render(formatInt(codexTokens)),
+				labelStyle.Render("Cost:"), mutedStyle.Render(fmt.Sprintf("$%.2f", codexCost)),
+				labelStyle.Render("Sessions:"), mutedStyle.Render(fmt.Sprintf("%d", codexBlocks)),
+			),
+		)
+	}
+
 	// ── Cost chart: fixed height like tokscale ───────────────────────────────
 	const chartH = 10
 

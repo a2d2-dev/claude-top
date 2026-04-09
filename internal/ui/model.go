@@ -182,14 +182,16 @@ type sessionsState struct {
 
 // Model is the bubbletea application model.
 type Model struct {
-	blocks   []data.SessionBlock
-	daily    []data.DailyStats
-	plan     core.Plan
-	dataPath string
-	width    int
-	height   int
-	loading  bool
-	err      error
+	blocks    []data.SessionBlock
+	daily     []data.DailyStats
+	plan      core.Plan
+	dataPath  string
+	codexPath string // path to ~/.codex/sessions; empty = use default
+	source    string // "all", "claude", or "codex"
+	width     int
+	height    int
+	loading   bool
+	err       error
 
 	// refreshing is true while a full disk refresh runs in the background.
 	refreshing  bool
@@ -207,18 +209,28 @@ type Model struct {
 
 	// Upload overlay — active when upload.phase != uploadIdle.
 	uploadOverlay uploadState
+
+	// Settings overlay — active when settings.phase != settingsIdle.
+	settings settingsState
 }
 
-// NewModel creates a Model with the given plan and data path.
-func NewModel(planName, dataPath string) Model {
+// NewModel creates a Model with the given plan, data path, source filter, and codex path.
+// source: "all" | "claude" | "codex" — controls which data sources are loaded.
+// codexPath: path to Codex sessions dir; empty uses the default ~/.codex/sessions.
+func NewModel(planName, dataPath, source, codexPath string) Model {
+	if source == "" {
+		source = "all"
+	}
 	return Model{
-		plan:     core.GetPlan(planName),
-		dataPath: dataPath,
-		loading:  true,
-		width:    120,
-		height:   40,
-		tab:      tabOverview,
-		sessions: sessionsState{sortColumn: sortByStart, sortAsc: false},
+		plan:      core.GetPlan(planName),
+		dataPath:  dataPath,
+		codexPath: codexPath,
+		source:    source,
+		loading:   true,
+		width:     120,
+		height:    40,
+		tab:       tabOverview,
+		sessions:  sessionsState{sortColumn: sortByStart, sortAsc: false},
 	}
 }
 
@@ -228,7 +240,7 @@ func NewModel(planName, dataPath string) Model {
 //   - loadCached: reads only the on-disk gob, returns in ~80 ms.
 //   - loadData: full stat+parse cycle, delivers up-to-date data once done.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadCached(), loadData(m.dataPath), tick())
+	return tea.Batch(loadCached(m.source), loadData(m.dataPath, m.codexPath, m.source), tick())
 }
 
 // Update handles incoming messages and user input.
@@ -241,7 +253,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.refreshing = true
-		return m, tea.Batch(loadData(m.dataPath), tick())
+		return m, tea.Batch(loadData(m.dataPath, m.codexPath, m.source), tick())
 
 	case loadedMsg:
 		if msg.fromCache {
@@ -295,13 +307,22 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m.handleUploadKey2(key)
 	}
 
+	// Settings overlay captures all keys while active.
+	if m.settings.phase != settingsIdle {
+		return m.handleSettingsKeyWrapper(key)
+	}
+
 	// Global keys.
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "r":
 		m.refreshing = true
-		return m, loadData(m.dataPath)
+		return m, loadData(m.dataPath, m.codexPath, m.source)
+	case "s":
+		// Open settings modal.
+		m = m.openSettings()
+		return m, nil
 	case "u":
 		// Upload / auth: check existing auth before starting Device Flow.
 		return m.handleUploadKey()
@@ -331,6 +352,17 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m.handleDailyKey(key)
 	}
 	return m, nil
+}
+
+// handleSettingsKeyWrapper bridges settings key handling to bubbletea.
+// It triggers a data reload when settings are saved.
+func (m Model) handleSettingsKeyWrapper(key string) (tea.Model, tea.Cmd) {
+	newModel, reloadMsg := m.handleSettingsKey(key)
+	if reloadMsg.reload {
+		newModel.loading = true
+		return newModel, loadData(newModel.dataPath, newModel.codexPath, newModel.source)
+	}
+	return newModel, nil
 }
 
 // handleSessionsKey processes keys when the Sessions tab is active.
@@ -616,10 +648,25 @@ func tick() tea.Cmd {
 }
 
 // loadCached reads only the on-disk gob cache (fast preliminary load).
-func loadCached() tea.Cmd {
+// source controls which cache(s) are read: "all", "claude", or "codex".
+func loadCached(source string) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := data.LoadCached()
-		if err != nil || len(entries) == 0 {
+		var entries []data.UsageEntry
+
+		if source == "all" || source == "claude" {
+			ce, err := data.LoadCached()
+			if err == nil {
+				entries = append(entries, ce...)
+			}
+		}
+		if source == "all" || source == "codex" {
+			xe, err := data.LoadCodexCached()
+			if err == nil {
+				entries = append(entries, xe...)
+			}
+		}
+
+		if len(entries) == 0 {
 			return loadedMsg{fromCache: true}
 		}
 		blocks := core.BuildSessionBlocks(entries)
@@ -628,9 +675,11 @@ func loadCached() tea.Cmd {
 }
 
 // loadData reads all JSONL files (full refresh with cache validation).
-func loadData(dataPath string) tea.Cmd {
+// dataPath is the Claude projects dir; codexPath is the Codex sessions dir.
+// source: "all" | "claude" | "codex".
+func loadData(dataPath, codexPath, source string) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := data.LoadEntries(dataPath)
+		entries, err := data.LoadAllEntries(dataPath, codexPath, source)
 		if err != nil {
 			return loadedMsg{err: err}
 		}

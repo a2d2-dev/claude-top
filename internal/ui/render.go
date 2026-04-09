@@ -41,6 +41,12 @@ func RenderDashboard(m Model) string {
 		return strings.Join([]string{header, tabBar, content, footer}, "\n")
 	}
 
+	// Settings overlay takes over the content area.
+	if m.settings.phase != settingsIdle {
+		content := renderSettingsOverlay(m, contentH)
+		return strings.Join([]string{header, tabBar, content, footer}, "\n")
+	}
+
 	var content string
 	switch m.tab {
 	case tabOverview:
@@ -117,6 +123,11 @@ func renderFooter(m Model) string {
 		}
 	}
 
+	// Settings overlay has its own footer hint.
+	if m.settings.phase != settingsIdle {
+		return mutedStyle.Render("  ↑↓ select  Tab codex path  Enter save  Esc cancel")
+	}
+
 	var hint string
 	switch m.tab {
 	case tabSessions:
@@ -124,13 +135,13 @@ func renderFooter(m Model) string {
 		case viewDetail, viewMsgDetail:
 			hint = "" // hint is rendered inside renderDetailPanel
 		default:
-			hint = fmt.Sprintf("  ↑↓ cursor  Enter detail  u upload  s/S sort(%s)  / direction  Tab switch  q quit",
+			hint = fmt.Sprintf("  ↑↓ cursor  Enter detail  u upload  s settings  S sort(%s)  / dir  Tab switch  q quit",
 				sortColNames[m.sessions.sortColumn])
 		}
 	case tabDaily:
-		hint = "  ↑↓ cursor  Tab switch  q quit"
+		hint = "  ↑↓ cursor  Tab switch  s settings  q quit"
 	default:
-		hint = "  1-3 tabs  Tab switch  u upload  r refresh  q quit"
+		hint = "  1-3 tabs  Tab switch  u upload  s settings  r refresh  q quit"
 	}
 	return mutedStyle.Render(hint)
 }
@@ -254,7 +265,8 @@ func histColWidths(innerW int) [6]int {
 }
 
 // historyDataRow renders one history table row.
-func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool) string {
+// showSource controls whether a [C]/[X] source prefix is prepended (multi-source mode).
+func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bool) string {
 	updatedAt := s.StartTime
 	if s.ActualEndTime != nil {
 		updatedAt = *s.ActualEndTime
@@ -283,11 +295,29 @@ func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool) string {
 		parts[i] = rowStyle.Width(colW[i]).Render(truncateStr(c, colW[i]))
 	}
 
-	prefix := "  "
+	// Build prefix: cursor indicator + optional source tag.
+	cursorIndicator := "  "
 	if cursor {
-		prefix = "▶ "
+		cursorIndicator = "▶ "
 	}
-	return prefix + strings.Join(parts, " ")
+
+	if showSource {
+		// Source tag: [C] for claude, [X] for codex, [?] for unknown.
+		var sourceTag string
+		switch s.Source {
+		case "codex":
+			sourceTag = "[X]"
+		default:
+			sourceTag = "[C]"
+		}
+		prefix := cursorIndicator[:1] + sourceTag + " "
+		if cursor {
+			prefix = "▶" + sourceTag + " "
+		}
+		return prefix + strings.Join(parts, " ")
+	}
+
+	return cursorIndicator + strings.Join(parts, " ")
 }
 
 // ── Detail panel (shared by Sessions tab) ─────────────────────────────────────
@@ -649,7 +679,7 @@ func renderDetailPanel(m Model, s *data.SessionBlock, height int) string {
 // RenderDetailPanelForTest renders the session detail panel at the given
 // terminal width/height. Used by cmd/bench for visual layout verification.
 func RenderDetailPanelForTest(block data.SessionBlock, width, height int) string {
-	m := NewModel("pro", "")
+	m := NewModel("pro", "", "claude", "")
 	m.width = width
 	m.height = height
 	return renderDetailPanel(m, &block, height-3)
@@ -658,7 +688,7 @@ func RenderDetailPanelForTest(block data.SessionBlock, width, height int) string
 // RenderMsgDetailPanelForTest renders the message detail view for the first
 // message in block. Used by cmd/bench for visual layout verification.
 func RenderMsgDetailPanelForTest(block data.SessionBlock, width, height int) string {
-	m := NewModel("pro", "")
+	m := NewModel("pro", "", "claude", "")
 	m.width = width
 	m.height = height
 	m.sessions.view = viewMsgDetail
