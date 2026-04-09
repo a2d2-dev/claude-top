@@ -135,13 +135,13 @@ func renderFooter(m Model) string {
 		case viewDetail, viewMsgDetail:
 			hint = "" // hint is rendered inside renderDetailPanel
 		default:
-			hint = fmt.Sprintf("  ↑↓ cursor  Enter detail  u upload  , settings  S sort(%s)  / dir  Tab switch  q quit",
+			hint = fmt.Sprintf("  ↑↓ cursor  Enter detail  u upload  ,/o settings  S sort(%s)  / dir  Tab switch  q quit",
 				sortColNames[m.sessions.sortColumn])
 		}
 	case tabDaily:
-		hint = "  ↑↓ cursor  Tab switch  , settings  q quit"
+		hint = "  ↑↓ cursor  Tab switch  ,/o settings  q quit"
 	default:
-		hint = "  1-3 tabs  Tab switch  u upload  , settings  r refresh  q quit"
+		hint = "  1-3 tabs  Tab switch  u upload  ,/o settings  r refresh  q quit"
 	}
 	return mutedStyle.Render(hint)
 }

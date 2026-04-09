@@ -319,7 +319,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	case "r":
 		m.refreshing = true
 		return m, loadData(m.dataPath, m.codexPath, m.source)
-	case ",":
+	case ",", "o":
 		// Open settings modal.
 		m = m.openSettings()
 		return m, nil
