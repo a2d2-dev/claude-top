@@ -105,15 +105,15 @@ func TestParseCodexFile_TokenDedup(t *testing.T) {
 	// Build JSONL lines: session_meta, turn_context, user_message,
 	// then 3 token_count events: first unique, second unique, third = duplicate of second.
 	lines := []string{
-		`{"event_msg":"session_meta","payload":{"id":"sess-test-001"}}`,
-		`{"event_msg":"turn_context","payload":{"model":"codex-mini-latest","timestamp":1712345678000}}`,
-		`{"event_msg":"user_message","payload":{"text":"hello codex","timestamp":1712345679000}}`,
+		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-test-001"}}`,
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"turn_context","payload":{"model":"codex-mini-latest"}}`,
+		`{"timestamp":"2026-04-10T00:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"hello codex","images":[]}}`,
 		// First token_count (unique)
-		`{"event_msg":"token_count","payload":{"timestamp":1712345680000,"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0}}}`,
+		`{"timestamp":"2026-04-10T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0}}}}`,
 		// Second token_count (different from first — final streamed value)
-		`{"event_msg":"token_count","payload":{"timestamp":1712345681000,"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}`,
+		`{"timestamp":"2026-04-10T00:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}}`,
 		// Third token_count — identical to second (streaming duplicate, should be skipped)
-		`{"event_msg":"token_count","payload":{"timestamp":1712345682000,"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}`,
+		`{"timestamp":"2026-04-10T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}}`,
 	}
 
 	content := ""
@@ -174,9 +174,9 @@ func TestLoadCodexEntries_WithData(t *testing.T) {
 	}
 	filePath := filepath.Join(sessionDir, "session-abc.jsonl")
 
-	content := `{"event_msg":"session_meta","payload":{"id":"sess-abc"}}
-{"event_msg":"turn_context","payload":{"model":"codex-mini-latest","timestamp":1712345678000}}
-{"event_msg":"token_count","payload":{"timestamp":1712345680000,"last_token_usage":{"input_tokens":500,"cached_input_tokens":0,"output_tokens":100,"reasoning_output_tokens":0}}}
+	content := `{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-abc"}}
+{"timestamp":"2026-04-10T00:00:01Z","type":"turn_context","payload":{"model":"codex-mini-latest"}}
+{"timestamp":"2026-04-10T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":500,"cached_input_tokens":0,"output_tokens":100,"reasoning_output_tokens":0}}}}
 `
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -210,10 +210,10 @@ func TestLoadAllEntries_Sources(t *testing.T) {
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := fmt.Sprintf(`{"event_msg":"session_meta","payload":{"id":"sess-load-all"}}
-{"event_msg":"turn_context","payload":{"model":"codex-mini-latest","timestamp":%d}}
-{"event_msg":"token_count","payload":{"timestamp":%d,"last_token_usage":{"input_tokens":300,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0}}}
-`, 1712345678000, 1712345680000)
+	content := fmt.Sprintf(`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-load-all-%d"}}
+{"timestamp":"2026-04-10T00:00:01Z","type":"turn_context","payload":{"model":"codex-mini-latest"}}
+{"timestamp":"2026-04-10T00:00:02.%03dZ","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":300,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0}}}}
+`, 1712345678, 680)
 	if err := os.WriteFile(filepath.Join(sessionDir, "s.jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

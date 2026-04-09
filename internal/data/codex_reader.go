@@ -15,10 +15,12 @@ import (
 
 // codexEvent represents a single line in a Codex JSONL session file.
 type codexEvent struct {
-	// EventMsg is the event type string (e.g., "session_meta", "token_count").
-	EventMsg string          `json:"event_msg"`
+	// Timestamp is an ISO 8601 timestamp string at the top level.
+	Timestamp string          `json:"timestamp"`
+	// Type is the event type: "session_meta", "turn_context", "event_msg", "response_item".
+	Type      string          `json:"type"`
 	// Payload holds the event-specific data as raw JSON for flexible parsing.
-	Payload  json.RawMessage `json:"payload"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 // codexSessionMeta is the payload for "session_meta" events.
@@ -31,16 +33,17 @@ type codexSessionMeta struct {
 type codexTurnContext struct {
 	// Model is the AI model used for this turn.
 	Model string `json:"model"`
-	// Timestamp is Unix milliseconds.
-	Timestamp int64 `json:"timestamp"`
 }
 
-// codexUserMessage is the payload for "user_message" events.
-type codexUserMessage struct {
-	// Text is the user's prompt text.
-	Text string `json:"text"`
-	// Timestamp is Unix milliseconds.
-	Timestamp int64 `json:"timestamp"`
+// codexEventMsgPayload is the payload for "event_msg" wrapper events.
+// The inner SubType field distinguishes user_message, token_count, etc.
+type codexEventMsgPayload struct {
+	// SubType is the inner event type: "user_message", "token_count", etc.
+	SubType string `json:"type"`
+	// Message holds the user text for "user_message" sub-type.
+	Message string `json:"message"`
+	// Info holds token usage for "token_count" sub-type.
+	Info json.RawMessage `json:"info"`
 }
 
 // codexLastTokenUsage holds token usage totals from a token_count event.
@@ -55,11 +58,9 @@ type codexLastTokenUsage struct {
 	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
 }
 
-// codexTokenCount is the payload for "token_count" events.
-type codexTokenCount struct {
-	// Timestamp is Unix milliseconds.
-	Timestamp int64 `json:"timestamp"`
-	// LastTokenUsage contains the cumulative token usage snapshot for this event.
+// codexTokenCountInfo is the "info" field inside a token_count event.
+type codexTokenCountInfo struct {
+	// LastTokenUsage is the cumulative token usage snapshot for deduplication.
 	LastTokenUsage *codexLastTokenUsage `json:"last_token_usage"`
 }
 
@@ -120,7 +121,7 @@ func parseCodexFile(path string) ([]UsageEntry, error) {
 // processCodexEvent updates the parse state based on the event type and optionally
 // returns a UsageEntry when a final token_count event is detected.
 func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) (UsageEntry, bool) {
-	switch evt.EventMsg {
+	switch evt.Type {
 	case "session_meta":
 		var meta codexSessionMeta
 		if err := json.Unmarshal(evt.Payload, &meta); err == nil && meta.ID != "" {
@@ -133,27 +134,37 @@ func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) 
 			state.currentModel = ctx.Model
 		}
 
-	case "user_message":
-		var msg codexUserMessage
-		if err := json.Unmarshal(evt.Payload, &msg); err == nil {
-			state.currentPrompt = truncateCodexPrompt(msg.Text)
+	case "event_msg":
+		// event_msg is a wrapper; dispatch on the inner sub-type.
+		var inner codexEventMsgPayload
+		if err := json.Unmarshal(evt.Payload, &inner); err != nil {
+			return UsageEntry{}, false
 		}
-
-	case "token_count":
-		return processTokenCount(evt.Payload, state, filePath)
+		switch inner.SubType {
+		case "user_message":
+			if inner.Message != "" {
+				state.currentPrompt = truncateCodexPrompt(inner.Message)
+			}
+		case "token_count":
+			return processTokenCount(inner.Info, evt.Timestamp, state, filePath)
+		}
 	}
 
 	return UsageEntry{}, false
 }
 
 // processTokenCount handles a token_count event, applying streaming deduplication.
+// infoRaw is the raw JSON of the "info" field; timestamp is the ISO 8601 event timestamp.
 // Returns a UsageEntry and true only when the token snapshot has changed from the last one.
-func processTokenCount(payload json.RawMessage, state *codexParseState, filePath string) (UsageEntry, bool) {
-	var tc codexTokenCount
-	if err := json.Unmarshal(payload, &tc); err != nil || tc.LastTokenUsage == nil {
+func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexParseState, filePath string) (UsageEntry, bool) {
+	if len(infoRaw) == 0 {
 		return UsageEntry{}, false
 	}
-	usage := tc.LastTokenUsage
+	var info codexTokenCountInfo
+	if err := json.Unmarshal(infoRaw, &info); err != nil || info.LastTokenUsage == nil {
+		return UsageEntry{}, false
+	}
+	usage := info.LastTokenUsage
 
 	// Skip all-zero snapshots (no actual token activity).
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 &&
@@ -169,7 +180,12 @@ func processTokenCount(payload json.RawMessage, state *codexParseState, filePath
 	// Snapshot has changed (or is the first one) — emit entry and update state.
 	state.lastTokenUsage = usage
 
-	ts := resolveTimestamp(tc.Timestamp, state.fileDateFallback)
+	// Parse ISO 8601 timestamp; fall back to directory-derived date.
+	ts, err := parseTimestamp(timestamp)
+	if err != nil || ts.IsZero() {
+		ts = state.fileDateFallback
+	}
+
 	sessionID := state.currentSession
 	if sessionID == "" {
 		sessionID = filepath.Base(filePath)
@@ -213,15 +229,6 @@ func deriveDateFromPath(path string) time.Time {
 		}
 	}
 	return time.Time{}
-}
-
-// resolveTimestamp converts Unix milliseconds to a UTC time.
-// Falls back to fileDateFallback if timestampMs is zero.
-func resolveTimestamp(timestampMs int64, fallback time.Time) time.Time {
-	if timestampMs > 0 {
-		return time.Unix(timestampMs/1000, (timestampMs%1000)*int64(time.Millisecond)).UTC()
-	}
-	return fallback
 }
 
 // buildCodexMessageID constructs a deterministic message ID from session and timestamp.
