@@ -291,35 +291,47 @@ html[lang="zh"] [data-lang="en"] { display: none !important; }
   color: var(--amber); font-size: 0.58rem; flex-shrink: 0;
 }
 
-/* Daily calendar */
-.term-cal { padding: 0.35rem 1rem 0; }
-.term-cal-hdr {
-  display: grid; grid-template-columns: repeat(7, 1fr);
-  gap: 2px; margin-bottom: 3px;
-}
-.cal-hdr-cell {
-  text-align: center; font-size: 0.58rem; color: var(--text-dim);
-}
-.term-cal-week {
-  display: grid; grid-template-columns: repeat(7, 1fr);
+/* Daily calendar — horizontal layout matching real TUI */
+.term-cal-h { padding: 0.3rem 0.75rem 0; }
+.term-cal-month-row {
+  display: grid; grid-template-columns: 1.6rem repeat(12, 1fr);
   gap: 2px; margin-bottom: 2px;
 }
-.cal-day {
-  height: 10px; border-radius: 2px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 0.5rem;
+.cal-month-lbl {
+  font-size: 0.58rem; color: var(--text-dim);
+  grid-column: span 3; text-align: left;
+  overflow: hidden; white-space: nowrap;
 }
-.d-nil { background: hsl(215 19% 16%); }
-.d-lo  { background: hsl(198 70% 30%); }
-.d-md  { background: hsl(38 80% 40%); }
-.d-hi  { background: hsl(142 60% 38%); }
-.d-pk  { background: hsl(142 70% 50%); }
-.d-today { outline: 1px solid var(--primary); outline-offset: 1px; }
-.term-cal-footer {
-  padding: 0.35rem 0 0.15rem;
-  font-size: 0.62rem; color: var(--text-dim);
-  display: flex; gap: 1rem;
+.term-cal-day-row {
+  display: grid; grid-template-columns: 1.6rem repeat(12, 1fr);
+  gap: 2px; margin-bottom: 2px; align-items: center;
 }
+.cal-day-lbl { font-size: 0.6rem; color: hsl(215 16% 46%); }
+/* heatmap cell — green-only shades matching real TUI */
+.cc {
+  height: 8px; border-radius: 1px;
+}
+.cc-nil { background: hsl(215 19% 14%); }
+.cc-lo  { background: hsl(142 45% 18%); }
+.cc-md  { background: hsl(142 55% 33%); }
+.cc-hi  { background: hsl(142 65% 48%); }
+.cc-today { outline: 1px solid hsl(38 92% 50%); outline-offset: 1px; }
+.term-cost-summary {
+  padding: 0.3rem 0.75rem;
+  border-top: 1px solid hsl(215 19% 20%);
+  font-size: 0.62rem;
+}
+.term-daily-row {
+  display: flex; align-items: center; gap: 0;
+  padding: 0.25rem 0.75rem; font-size: 0.62rem;
+  border-top: 1px solid hsl(215 19% 20%);
+}
+.daily-bar-wrap {
+  flex: 1; height: 5px;
+  background: hsl(215 19% 20%); border-radius: 2px; overflow: hidden;
+  margin: 0 0.4rem;
+}
+.daily-bar-fill { height: 100%; background: hsl(142 55% 40%); border-radius: 2px; }
 
 /* Copy 按钮 */
 .btn-copy {
@@ -611,14 +623,15 @@ const TerminalBlock = () => {
     { h: 18, t: 'lo' }, { h: 36, t: 'md' }, { h: 44, t: 'hi' }, { h: 8,  t: 'lo' },
   ];
 
-  // 日历热力图数据（April 2026，每行一周 Mon→Sun）
-  const calWeeks = [
-    ['nil','nil','nil','lo', 'nil','nil','nil'],  // Apr 1 starts on Wed
-    ['nil','lo', 'md', 'lo', 'nil','nil','nil'],
-    ['nil','md', 'hi', 'pk', 'md', 'nil','nil'],
-    ['nil','hi', 'pk', 'hi', 'md', 'nil','nil'],
-    ['nil','md', 'lo', 'nil','nil','nil','nil'],  // Apr 28-30 + empty
-  ] as const;
+  // 水平热力图：每行=一个工作日，每列=一周（共12周，模拟最近3个月）
+  // 0=无 1=低 2=中 3=高，行顺序：Mo/We/Fr/Su
+  const calRows: Array<{ label: string; cells: number[] }> = [
+    { label: 'Mo', cells: [0,0,0,1,2,0,2,3,2,3,2,3] },
+    { label: 'We', cells: [0,0,0,1,2,1,3,3,3,3,2,1] },
+    { label: 'Fr', cells: [0,0,0,0,1,1,2,2,3,3,3,0] },
+    { label: 'Su', cells: [0,0,0,0,1,0,1,2,1,2,1,0] },
+  ];
+  const ccClass = ['cc-nil','cc-lo','cc-md','cc-hi'];
 
   return (
     <div class="hero-terminal terminal">
@@ -728,44 +741,71 @@ const TerminalBlock = () => {
 
       {/* ── Screen 3: Daily ── */}
       <div id="ts-daily" class="term-screen">
-        <div class="term-section-hdr">DAILY USAGE — April 2026</div>
+        <div class="term-section-hdr" style="color:hsl(38 92% 60%)">DAILY &amp; STATS</div>
 
-        <div class="term-cal">
-          <div class="term-cal-hdr">
-            {['Mo','Tu','We','Th','Fr','Sa','Su'].map((d) => (
-              <span class="cal-hdr-cell">{d}</span>
-            ))}
+        {/* 水平热力图（月份跨列，工作日作行，与真实 TUI 一致） */}
+        <div class="term-cal-h">
+          {/* 月份标签行 */}
+          <div class="term-cal-month-row">
+            <span />{/* day-label spacer */}
+            <span class="cal-month-lbl">Feb</span>
+            <span /><span />
+            <span class="cal-month-lbl">Mar</span>
+            <span /><span />
+            <span class="cal-month-lbl">Apr</span>
+            <span /><span /><span /><span />
           </div>
-          {calWeeks.map((week, wi) => (
-            <div class="term-cal-week">
-              {week.map((intensity, di) => (
-                <div class={`cal-day d-${intensity}${wi === 4 && di === 1 ? ' d-today' : ''}`} />
+          {/* 热力图行（Mo / We / Fr / Su） */}
+          {calRows.map((row) => (
+            <div class="term-cal-day-row" key={row.label}>
+              <span class="cal-day-lbl">{row.label}</span>
+              {row.cells.map((v, i) => (
+                <div class={`cc ${ccClass[v]}${i === 11 ? ' cc-today' : ''}`} key={i} />
               ))}
             </div>
           ))}
-          <div class="term-cal-footer">
-            <span class="t-ok">Today $4.43</span>
-            <span class="t-dim"> | Peak Apr 7</span>
-            <span class="t-hi"> $8.21</span>
+          {/* Less → More 图例 */}
+          <div style="display:flex;align-items:center;gap:3px;margin-top:3px;font-size:0.58rem;color:hsl(215 16% 46%)">
+            <span style="margin-right:2px">Less</span>
+            {['cc-nil','cc-lo','cc-md','cc-hi'].map((c) => (
+              <div class={`cc ${c}`} style="width:10px;flex-shrink:0" key={c} />
+            ))}
+            <span style="margin-left:2px">More</span>
           </div>
         </div>
 
-        <div style="border-top:1px solid hsl(215 19% 20%);margin:0.25rem 0" />
-        <div class="term-info" style="display:flex;gap:1.5rem;padding-top:0.2rem">
-          <span class="t-dim">Today <span class="t-out">12 sessions</span></span>
-          <span class="t-dim">Month <span class="t-out">847 sessions</span></span>
+        {/* COST SUMMARY */}
+        <div class="term-cost-summary" style="color:hsl(38 92% 60%);font-weight:700;margin-bottom:0.15rem">
+          COST SUMMARY
+        </div>
+        <div class="term-cost-summary" style="padding-top:0;line-height:1.7">
+          <div class="t-dim">
+            Total cost: <span class="t-hi">$2,573.86</span>
+            &nbsp;&nbsp;Active days: <span class="t-out">83</span>
+            &nbsp;&nbsp;Avg/day: <span class="t-dim">$31.01</span>
+          </div>
+          <div class="t-dim">
+            Peak day: <span class="t-hi">$121.56</span>
+            <span style="color:hsl(215 16% 46%)"> (2026-04-05)</span>
+          </div>
+        </div>
+
+        {/* DAILY 日明细表头 + 一行示例 */}
+        <div class="term-daily-row" style="color:var(--primary)">
+          DAILY&nbsp;<span class="t-dim">[1-42 / 83]</span>
+        </div>
+        <div class="term-daily-row" style="background:hsl(198 93% 59% / 0.08)">
+          <span class="t-ok" style="min-width:5.5rem">04-09 Thu</span>
+          <span class="t-dim" style="min-width:2.5rem">261</span>
+          <span class="t-dim" style="min-width:3.2rem">26.7M</span>
+          <span class="t-ok" style="min-width:3.5rem">$12.69</span>
+          <div class="daily-bar-wrap"><div class="daily-bar-fill" style="width:10%" /></div>
+          <span class="t-dim">0.5%</span>
         </div>
 
         <div class="term-hint">
           <span class="term-hint-key">3</span>
           <span class="t-dim">switch to daily view</span>
-          <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
-            <span class="cal-day d-lo" style="width:8px;display:inline-block" />
-            <span class="cal-day d-md" style="width:8px;display:inline-block" />
-            <span class="cal-day d-hi" style="width:8px;display:inline-block" />
-            <span class="cal-day d-pk" style="width:8px;display:inline-block" />
-            <span class="t-dim" style="font-size:0.58rem">cost</span>
-          </span>
         </div>
       </div>
     </div>
