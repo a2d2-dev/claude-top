@@ -109,12 +109,14 @@ const (
 
 // uploadState holds all state for the upload overlay.
 type uploadState struct {
-	phase    uploadPhase
-	stats    *upload.MonthlyStats // populated in uploadConfirm
-	rank     int                  // populated on uploadSuccess
-	total    int                  // total users, populated on uploadSuccess
-	shareURL string               // populated on uploadSuccess
-	errMsg   string               // populated on uploadError
+	phase       uploadPhase
+	stats       *upload.MonthlyStats // populated in uploadConfirm (combined for "all")
+	claudeStats *upload.MonthlyStats // non-nil when source=all, for per-source display
+	codexStats  *upload.MonthlyStats // non-nil when source=all and codex data exists
+	rank        int                  // populated on uploadSuccess
+	total       int                  // total users, populated on uploadSuccess
+	shareURL    string               // populated on uploadSuccess
+	errMsg      string               // populated on uploadError
 }
 
 // ── Upload tea messages ────────────────────────────────────────────────────────
@@ -880,13 +882,8 @@ func (m Model) handleUploadKey() (tea.Model, tea.Cmd) {
 // upload confirmation dialog. Called after successful auth or on 'u' if
 // already authenticated.
 func (m Model) startUploadConfirm(info *auth.AuthInfo) (tea.Model, tea.Cmd) {
-	// When source=all, aggregate combined stats for the confirm dialog.
-	// Actual uploads are split per-source in doUploadCmd.
-	aggregateSource := m.source
-	if aggregateSource == "all" {
-		aggregateSource = "all"
-	}
-	stats, err := upload.AggregateCurrentMonth(m.blocks, aggregateSource)
+	// Aggregate combined stats for the confirm dialog total.
+	stats, err := upload.AggregateCurrentMonth(m.blocks, m.source)
 	if err != nil {
 		m.uploadOverlay = uploadState{
 			phase:  uploadError,
@@ -894,10 +891,21 @@ func (m Model) startUploadConfirm(info *auth.AuthInfo) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	m.uploadOverlay = uploadState{
+
+	overlay := uploadState{
 		phase: uploadConfirm,
 		stats: stats,
 	}
+
+	// When source=all, also compute per-source breakdown for the dialog.
+	if m.source == "all" {
+		claudeStats, _ := upload.AggregateCurrentMonth(m.blocks, "claude")
+		codexStats, _ := upload.AggregateCurrentMonth(m.blocks, "codex")
+		overlay.claudeStats = claudeStats
+		overlay.codexStats = codexStats
+	}
+
+	m.uploadOverlay = overlay
 	return m, nil
 }
 

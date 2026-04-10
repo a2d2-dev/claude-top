@@ -911,10 +911,36 @@ func renderUploadOverlay(m Model, height int) string {
 		if dev, err := loadDeviceName(); err == nil {
 			lines = append(lines, fmt.Sprintf("  %-12s %s", "设备：", valueStyle.Render(dev)))
 		}
+		// When both sources are present, show per-source breakdown.
+		if st.claudeStats != nil && st.codexStats != nil {
+			lines = append(lines, "")
+			if st.claudeStats.SessionCount > 0 || st.claudeStats.TotalCostUSD > 0 {
+				lines = append(lines,
+					labelStyle.Render("  Claude Code"),
+					fmt.Sprintf("  %-12s %s", "费用：", accentValueStyle.Render(fmt.Sprintf("$%.4f", st.claudeStats.TotalCostUSD))),
+					fmt.Sprintf("  %-12s %s  %s", "Token 数：", valueStyle.Render(formatTokenCount(st.claudeStats.TotalTokens())), fmt.Sprintf("Sessions: %d", st.claudeStats.SessionCount)),
+				)
+			}
+			if st.codexStats.SessionCount > 0 || st.codexStats.TotalCostUSD > 0 {
+				lines = append(lines,
+					"",
+					labelStyle.Render("  Codex CLI"),
+					fmt.Sprintf("  %-12s %s", "费用：", accentValueStyle.Render(fmt.Sprintf("$%.4f", st.codexStats.TotalCostUSD))),
+					fmt.Sprintf("  %-12s %s  %s", "Token 数：", valueStyle.Render(formatTokenCount(st.codexStats.TotalTokens())), fmt.Sprintf("Sessions: %d", st.codexStats.SessionCount)),
+				)
+			}
+			lines = append(lines,
+				"",
+				fmt.Sprintf("  %-12s %s", "合计费用：", accentValueStyle.Render(fmt.Sprintf("$%.4f", s.TotalCostUSD))),
+			)
+		} else {
+			lines = append(lines,
+				fmt.Sprintf("  %-12s %s", "费用：", accentValueStyle.Render(fmt.Sprintf("$%.4f", s.TotalCostUSD))),
+				fmt.Sprintf("  %-12s %s", "Token 数：", valueStyle.Render(formatTokenCount(s.TotalTokens()))),
+				fmt.Sprintf("  %-12s %s", "Session 数：", valueStyle.Render(fmt.Sprintf("%d", s.SessionCount))),
+			)
+		}
 		lines = append(lines,
-			fmt.Sprintf("  %-12s %s", "费用：", accentValueStyle.Render(fmt.Sprintf("$%.4f", s.TotalCostUSD))),
-			fmt.Sprintf("  %-12s %s", "Token 数：", valueStyle.Render(formatTokenCount(s.TotalTokens()))),
-			fmt.Sprintf("  %-12s %s", "Session 数：", valueStyle.Render(fmt.Sprintf("%d", s.SessionCount))),
 			"",
 			mutedStyle.Render("  仅上传聚合统计，不含 prompt 内容或文件路径"),
 		)
