@@ -11,7 +11,8 @@ import (
 // or when the parsing logic changes in a way that alters stored field values.
 // v3: added Source field to UsageEntry and SessionBlock
 // v4: fixed Codex CWD to use session_meta.payload.cwd instead of file path
-const cacheVersion = 4
+// v5: fixed Codex InputTokens to subtract CacheReadTokens (avoid double billing)
+const cacheVersion = 5
 
 // cacheFilename is the name of the cache file on disk.
 const cacheFilename = "entries.cache"
