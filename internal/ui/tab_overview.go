@@ -211,14 +211,79 @@ func renderDailyCostChart(m Model, width int, chartH int) string {
 	// X-axis baseline.
 	baseline := strings.Repeat(" ", 7) + "└" + strings.Repeat("─", chartW)
 
-	// Time labels: start and end dates.
+	// Time labels: start, intermediate ticks (monthly or yearly), and end.
+	// Build a rune slice so we can place labels at exact column positions.
+	timeBuf := make([]rune, chartW)
+	for i := range timeBuf {
+		timeBuf[i] = ' '
+	}
+
+	// Place a label at a given column, clamping to stay within the buffer.
+	placeLabel := func(col int, label string) {
+		// Center the label on col; don't overwrite the start label.
+		start := col - len(label)/2
+		if start < 0 {
+			start = 0
+		}
+		if start+len(label) > chartW {
+			start = chartW - len(label)
+		}
+		for i, r := range label {
+			if start+i < chartW {
+				timeBuf[start+i] = r
+			}
+		}
+	}
+
+	// Always place start and end labels.
 	startLabel := startDate.Format("01/02")
 	endLabel := endDate.Format("01/02")
-	gap := chartW - len(startLabel) - len(endLabel)
-	timeLine := strings.Repeat(" ", 8) + startLabel
-	if gap > 0 {
-		timeLine += strings.Repeat(" ", gap) + endLabel
+	placeLabel(0, startLabel)
+	placeLabel(chartW-len(endLabel), endLabel)
+
+	// Choose intermediate tick interval: years if span > 18 months, else months.
+	spanMonths := (endDate.Year()-startDate.Year())*12 + int(endDate.Month()) - int(startDate.Month())
+	tickByYear := spanMonths > 18
+
+	// Walk from the first tick boundary after startDate to just before endDate.
+	var tickDate time.Time
+	if tickByYear {
+		tickDate = time.Date(startDate.Year()+1, 1, 1, 0, 0, 0, 0, time.UTC)
+	} else {
+		y, m, _ := startDate.Date()
+		if m == 12 {
+			y++
+			m = 1
+		} else {
+			m++
+		}
+		tickDate = time.Date(y, m, 1, 0, 0, 0, 0, time.UTC)
 	}
+	for tickDate.Before(endDate) {
+		// Column for this tick.
+		col := int(float64(tickDate.Sub(startDate).Hours()/24) / float64(totalDays) * float64(chartW))
+		var label string
+		if tickByYear {
+			label = tickDate.Format("2006")
+		} else if tickDate.Month() == 1 {
+			// January: show year to make year transitions obvious.
+			label = tickDate.Format("Jan 2006")
+		} else {
+			label = tickDate.Format("01/02")
+		}
+		// Only place the tick if it has enough breathing room from start/end.
+		if col > len(startLabel)+1 && col < chartW-len(endLabel)-len(label)-1 {
+			placeLabel(col, label)
+		}
+		// Advance to next tick.
+		if tickByYear {
+			tickDate = tickDate.AddDate(1, 0, 0)
+		} else {
+			tickDate = tickDate.AddDate(0, 1, 0)
+		}
+	}
+
+	timeLine := strings.Repeat(" ", 8) + string(timeBuf)
 
 	parts := append(rows, baseline, mutedStyle.Render(timeLine))
 	return strings.Join(parts, "\n")
