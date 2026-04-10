@@ -105,7 +105,7 @@ func renderOverview(m Model, height int) string {
 
 	if len(m.daily) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, sectionTitleStyle.Render("  RECENT COST  (30 days)"))
+		lines = append(lines, sectionTitleStyle.Render("  COST HISTORY"))
 		lines = append(lines, renderDailyCostChart(m, innerW-2, chartH))
 	}
 
@@ -113,24 +113,17 @@ func renderOverview(m Model, height int) string {
 	return cardStyle.Width(m.width - 2).Height(height - 2).Render(content)
 }
 
-// renderDailyCostChart renders a compact bar chart of daily costs for the last 30 days.
+// renderDailyCostChart renders a bar chart of all daily costs with a time-proportional
+// X-axis. Each column represents a fixed time slice of the total span; days with no
+// activity are empty. This prevents sparse old data from producing equal-width fat bars.
 // chartH controls how many rows tall the bar chart area is (min 4).
 func renderDailyCostChart(m Model, width int, chartH int) string {
 	if chartH < 4 {
 		chartH = 4
 	}
-	// Filter to the last 30 calendar days (not last 30 data points).
-	// This prevents stale/old sessions from distorting the time axis.
-	cutoff := time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -29)
-	days := m.daily[:0:0] // same element type as m.daily, initially empty
-	for _, d := range m.daily {
-		if !d.Date.Before(cutoff) {
-			days = append(days, d)
-		}
-	}
-	n := len(days)
 
-	if n == 0 || width < 10 {
+	days := m.daily
+	if len(days) == 0 || width < 10 {
 		return mutedStyle.Render("  No data")
 	}
 
@@ -145,22 +138,32 @@ func renderDailyCostChart(m Model, width int, chartH int) string {
 		return mutedStyle.Render("  No cost data")
 	}
 
-	chartW := width - 10 // leave space for y-axis
-	// Each day gets barW chars; spread days across available width.
-	barW := max(1, chartW/n)
-	// Recompute how many days actually fit.
-	fitDays := min(n, chartW/barW)
-	if fitDays < 1 {
-		fitDays = 1
-	}
-	days = days[n-fitDays:]
-	n = fitDays
-	chartW = n * barW
+	chartW := width - 10 // leave space for y-axis label
 
-	// Sample days to fit chart width (one entry per bar slot).
-	sampled := make([]float64, n)
-	for i := range n {
-		sampled[i] = days[i].CostUSD
+	// Build a lookup: date → cost.
+	const day = 24 * time.Hour
+	costByDate := make(map[time.Time]float64, len(days))
+	for _, d := range days {
+		key := d.Date.UTC().Truncate(day)
+		costByDate[key] = d.CostUSD
+	}
+
+	// Compute time span from first data day to today.
+	startDate := days[0].Date.UTC().Truncate(day)
+	endDate := time.Now().UTC().Truncate(day)
+	if days[len(days)-1].Date.After(endDate) {
+		endDate = days[len(days)-1].Date.UTC().Truncate(day)
+	}
+	totalDays := int(endDate.Sub(startDate).Hours()/24) + 1
+
+	// Map each chart column to the cost of the day it represents.
+	// Multiple days that fall in the same column are summed.
+	sampled := make([]float64, chartW)
+	for col := range chartW {
+		// Which day does this column start at?
+		dayOffset := int(float64(col) * float64(totalDays) / float64(chartW))
+		date := startDate.Add(time.Duration(dayOffset) * day)
+		sampled[col] = costByDate[date]
 	}
 
 	// Render rows.
@@ -185,29 +188,32 @@ func renderDailyCostChart(m Model, width int, chartH int) string {
 			var cell string
 			switch {
 			case frac >= rowTop:
-				cell = strings.Repeat("█", barW)
+				cell = "█"
 			case frac > rowBot:
 				partial := (frac - rowBot) / (rowTop - rowBot)
 				lvl := int(partial * float64(len(blockLevels)))
 				if lvl >= len(blockLevels) {
 					lvl = len(blockLevels) - 1
 				}
-				// Fill left portion with full block, rightmost char with partial.
-				cell = strings.Repeat("█", barW-1) + string(blockLevels[lvl])
+				cell = string(blockLevels[lvl])
 			default:
-				cell = strings.Repeat(" ", barW)
+				cell = " "
 			}
-			sb.WriteString(lipgloss.NewStyle().Foreground(costColor(frac)).Render(cell))
+			if c > 0 {
+				sb.WriteString(lipgloss.NewStyle().Foreground(costColor(frac)).Render(cell))
+			} else {
+				sb.WriteString(cell)
+			}
 		}
 		rows[row] = sb.String()
 	}
 
-	// X-axis.
+	// X-axis baseline.
 	baseline := strings.Repeat(" ", 7) + "└" + strings.Repeat("─", chartW)
 
-	// Time labels.
-	startLabel := days[0].Date.Format("01/02")
-	endLabel := days[len(days)-1].Date.Format("01/02")
+	// Time labels: start and end dates.
+	startLabel := startDate.Format("01/02")
+	endLabel := endDate.Format("01/02")
 	gap := chartW - len(startLabel) - len(endLabel)
 	timeLine := strings.Repeat(" ", 8) + startLabel
 	if gap > 0 {
