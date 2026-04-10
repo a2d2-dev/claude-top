@@ -77,14 +77,16 @@ type codexParseState struct {
 	currentCWD string
 	// currentPrompt is the user prompt from the most recent user_message event (truncated).
 	currentPrompt string
-	// lastTokenUsage is the previous token_count snapshot for streaming dedup.
-	lastTokenUsage *codexLastTokenUsage
+	// pendingEntry holds the latest token_count snapshot for the current AI turn.
+	// It is flushed (emitted) when the next user_message arrives or at end-of-file.
+	// This ensures only the FINAL snapshot per turn is recorded, not every streaming update.
+	pendingEntry *UsageEntry
 	// fileDateFallback is midnight UTC derived from the YYYY/MM/DD directory structure.
 	fileDateFallback time.Time
 }
 
 // parseCodexFile reads a single Codex JSONL file and returns usage entries.
-// It handles streaming deduplication: only the final token_count for a turn is emitted.
+// Only the final token_count snapshot per AI turn is emitted (not streaming intermediates).
 // Returns an empty slice (not an error) if the file contains no usable entries.
 func parseCodexFile(path string) ([]UsageEntry, error) {
 	f, err := os.Open(path)
@@ -119,11 +121,23 @@ func parseCodexFile(path string) ([]UsageEntry, error) {
 		return nil, err
 	}
 
+	// Flush any pending entry from the last AI turn in the file.
+	if state.pendingEntry != nil {
+		entries = append(entries, *state.pendingEntry)
+	}
+
 	return entries, nil
 }
 
-// processCodexEvent updates the parse state based on the event type and optionally
-// returns a UsageEntry when a final token_count event is detected.
+// processCodexEvent updates the parse state based on the event type.
+//
+// Event ordering in a Codex session file:
+//   user_message → turn_context → token_count (repeating, streaming) → user_message → …
+//
+// Strategy: buffer the latest token_count snapshot in state.pendingEntry (overwriting
+// each intermediate value). Flush (emit) the pending entry only when a new user_message
+// arrives — that signals the previous AI turn is complete. The final turn in the file
+// is flushed by parseCodexFile after the scanner loop ends.
 func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) (UsageEntry, bool) {
 	switch evt.Type {
 	case "session_meta":
@@ -151,43 +165,43 @@ func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) 
 		}
 		switch inner.SubType {
 		case "user_message":
+			// A new user turn begins. Flush the previous AI turn's pending entry first.
+			flushed := state.pendingEntry
+			state.pendingEntry = nil
 			if inner.Message != "" {
 				state.currentPrompt = truncateCodexPrompt(inner.Message)
 			}
+			if flushed != nil {
+				return *flushed, true
+			}
 		case "token_count":
-			return processTokenCount(inner.Info, evt.Timestamp, state, filePath)
+			// Overwrite pending entry with the latest snapshot for this AI turn.
+			// All streaming intermediates are discarded; only the last one will be emitted.
+			updatePendingEntry(inner.Info, evt.Timestamp, state, filePath)
 		}
 	}
 
 	return UsageEntry{}, false
 }
 
-// processTokenCount handles a token_count event, applying streaming deduplication.
-// infoRaw is the raw JSON of the "info" field; timestamp is the ISO 8601 event timestamp.
-// Returns a UsageEntry and true only when the token snapshot has changed from the last one.
-func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexParseState, filePath string) (UsageEntry, bool) {
+// updatePendingEntry parses a token_count event and stores it as state.pendingEntry,
+// overwriting any previous intermediate value. Non-final streaming snapshots are silently
+// discarded when the next snapshot arrives.
+func updatePendingEntry(infoRaw json.RawMessage, timestamp string, state *codexParseState, filePath string) {
 	if len(infoRaw) == 0 {
-		return UsageEntry{}, false
+		return
 	}
 	var info codexTokenCountInfo
 	if err := json.Unmarshal(infoRaw, &info); err != nil || info.LastTokenUsage == nil {
-		return UsageEntry{}, false
+		return
 	}
 	usage := info.LastTokenUsage
 
 	// Skip all-zero snapshots (no actual token activity).
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 &&
 		usage.CachedInputTokens == 0 && usage.ReasoningOutputTokens == 0 {
-		return UsageEntry{}, false
+		return
 	}
-
-	// Streaming dedup: skip if snapshot is identical to the previous one.
-	if state.lastTokenUsage != nil && tokenUsageEqual(usage, state.lastTokenUsage) {
-		return UsageEntry{}, false
-	}
-
-	// Snapshot has changed (or is the first one) — emit entry and update state.
-	state.lastTokenUsage = usage
 
 	// Parse ISO 8601 timestamp; fall back to directory-derived date.
 	ts, err := parseTimestamp(timestamp)
@@ -215,7 +229,7 @@ func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexPa
 		nonCachedInput = 0
 	}
 
-	entry := UsageEntry{
+	state.pendingEntry = &UsageEntry{
 		Timestamp:           ts,
 		Model:               state.currentModel,
 		InputTokens:         nonCachedInput,
@@ -228,16 +242,6 @@ func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexPa
 		UserPrompt:          state.currentPrompt,
 		Source:              "codex",
 	}
-
-	return entry, true
-}
-
-// tokenUsageEqual returns true when two token usage snapshots are identical.
-func tokenUsageEqual(a, b *codexLastTokenUsage) bool {
-	return a.InputTokens == b.InputTokens &&
-		a.CachedInputTokens == b.CachedInputTokens &&
-		a.OutputTokens == b.OutputTokens &&
-		a.ReasoningOutputTokens == b.ReasoningOutputTokens
 }
 
 // deriveDateFromPath extracts midnight UTC from a YYYY/MM/DD directory structure.
