@@ -109,6 +109,22 @@ Upload your monthly stats to compete globally at [claude-top.a2d2.dev](https://c
 - Claude Code and Codex CLI stats are tracked on separate leaderboards
 - Only aggregated token counts and costs are uploaded — no prompts, file paths, or session content
 
+## Changelog
+
+### v0.2.2
+
+- **fix(codex)**: Fixed Codex CLI cost calculation — OpenAI's `input_tokens` includes cached tokens (unlike Anthropic), causing cached tokens to be double-billed at both input and cache-read rates. Heavy Codex users with high cache hit rates (>90%) saw costs inflated by ~3-4x.
+
+### v0.2.1
+
+- **fix(npm)**: Added sibling-path fallback in launcher to fix Windows npx failure
+
+### v0.2.0
+
+- **feat**: Added Codex CLI support (`--source codex`), separate leaderboards per source
+- **feat**: Flattened tab structure — Claude Code / Codex CLI / About as single-level tabs
+- **feat**: Upload API versioning + per-source rank display on success
+
 ## Requirements
 
 Claude Code stores session data in `~/.claude/projects/`. Codex CLI stores session data in `~/.codex/sessions/`. Both are read directly — no network access required for local monitoring.
