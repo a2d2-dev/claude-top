@@ -96,7 +96,9 @@ func ReadMessageDetail(sourceFile, messageID string) (*MessageDetail, error) {
 	}
 	defer f.Close()
 
-	// Read all lines into a uuid-keyed map for quick lookup.
+	// Read all lines, then build uuid-keyed index.
+	// NOTE: the index is built AFTER collecting all lines so that append-growth
+	// never invalidates the pointers stored in byUUID.
 	type rawLine struct {
 		entryType  string
 		uuid       string
@@ -105,8 +107,6 @@ func ReadMessageDetail(sourceFile, messageID string) (*MessageDetail, error) {
 	}
 
 	var lines []rawLine
-	byUUID := make(map[string]*rawLine)
-
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 	for scanner.Scan() {
@@ -124,20 +124,23 @@ func ReadMessageDetail(sourceFile, messageID string) (*MessageDetail, error) {
 		}
 		cp := make([]byte, len(b))
 		copy(cp, b)
-		rl := rawLine{
+		lines = append(lines, rawLine{
 			entryType:  hdr.Type,
 			uuid:       hdr.UUID,
 			parentUUID: hdr.ParentUUID,
 			raw:        cp,
-		}
-		lines = append(lines, rl)
-		if hdr.UUID != "" {
-			idx := len(lines) - 1
-			byUUID[hdr.UUID] = &lines[idx]
-		}
+		})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+
+	// Build uuid → line index after slice is fully populated (no more appends).
+	byUUID := make(map[string]*rawLine, len(lines))
+	for i := range lines {
+		if lines[i].uuid != "" {
+			byUUID[lines[i].uuid] = &lines[i]
+		}
 	}
 
 	// Find the assistant line whose message.id matches messageID.

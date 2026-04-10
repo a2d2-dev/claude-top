@@ -498,10 +498,14 @@ func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, detail *data
 		lines = append(lines, "", mutedStyle.Render("  "+detail.LoadErr.Error()))
 
 	case detail != nil:
-		// User message text.
-		if detail.UserText != "" {
+		// User message text — prefer full text from file, fall back to cached prompt.
+		userText := detail.UserText
+		if userText == "" {
+			userText = e.UserPrompt
+		}
+		if userText != "" {
 			lines = append(lines, "", sectionTitleStyle.Render("  USER MESSAGE"))
-			lines = append(lines, wrapText(detail.UserText, textW, "  ")...)
+			lines = append(lines, wrapText(userText, textW, "  ")...)
 		}
 
 		// Tool results from previous assistant turn.
