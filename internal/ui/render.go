@@ -495,7 +495,12 @@ func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, detail *data
 		lines = append(lines, "", mutedStyle.Render("  Loading message content…"))
 
 	case detail != nil && detail.LoadErr != nil:
-		lines = append(lines, "", mutedStyle.Render("  "+detail.LoadErr.Error()))
+		// Show whatever we have from cache, then note why full content is unavailable.
+		if e.UserPrompt != "" {
+			lines = append(lines, "", sectionTitleStyle.Render("  USER MESSAGE"))
+			lines = append(lines, wrapText(e.UserPrompt, textW, "  ")...)
+		}
+		lines = append(lines, "", mutedStyle.Render("  ("+detail.LoadErr.Error()+")"))
 
 	case detail != nil:
 		// User message text — prefer full text from file, fall back to cached prompt.
