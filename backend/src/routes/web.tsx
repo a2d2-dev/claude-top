@@ -13,7 +13,7 @@
 import { Hono } from 'hono';
 import { html } from 'hono/html';
 import type { Bindings } from '../index';
-import { buildLeaderboard, queryUserStats, type LeaderboardEntry } from './leaderboard';
+import { buildLeaderboard, queryUserStats } from './leaderboard';
 import { LeaderboardPage } from '../pages/LeaderboardPage';
 import { UserPage, type MultiSourceUserData } from '../pages/UserPage';
 
@@ -45,19 +45,16 @@ function escapeHtml(str: string): string {
 /**
  * Validates the ?source= query parameter.
  * Returns 'claude' for missing/invalid values (backward compatibility).
- * 'all' is allowed as a placeholder for the future combined leaderboard.
  */
-function normalizePageSource(raw: string | undefined): 'claude' | 'codex' | 'all' {
+function normalizePageSource(raw: string | undefined): 'claude' | 'codex' {
   if (raw === 'codex') return 'codex';
-  if (raw === 'all') return 'all';
   return 'claude';
 }
 
 webRoutes.get('/', async (c) => {
   const period = c.req.query('period') ?? currentPeriod();
   const source = normalizePageSource(c.req.query('source'));
-  // For the landing page default to 'about' tab; load claude data for the leaderboard panel.
-  const rows = await buildLeaderboard(c.env.DB, period, source === 'all' ? 'claude' : source);
+  const rows = await buildLeaderboard(c.env.DB, period, source);
   return c.html(html`<!DOCTYPE html>${(
     <LeaderboardPage rows={rows} period={period} defaultTab="about" source={source} />
   )}`);
@@ -66,12 +63,9 @@ webRoutes.get('/', async (c) => {
 webRoutes.get('/leaderboard', async (c) => {
   const period = c.req.query('period') ?? currentPeriod();
   const source = normalizePageSource(c.req.query('source'));
-  // Fetch rows for the requested source; 'all' shows placeholder (no DB query needed).
-  const rows: LeaderboardEntry[] = source === 'all'
-    ? []
-    : await buildLeaderboard(c.env.DB, period, source);
+  const rows = await buildLeaderboard(c.env.DB, period, source);
   return c.html(html`<!DOCTYPE html>${(
-    <LeaderboardPage rows={rows} period={period} defaultTab="leaderboard" source={source} />
+    <LeaderboardPage rows={rows} period={period} defaultTab={source} source={source} />
   )}`);
 });
 

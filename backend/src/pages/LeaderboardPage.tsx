@@ -21,10 +21,10 @@ export interface LeaderboardRow {
 interface LeaderboardPageProps {
   rows: LeaderboardRow[];
   period: string;
-  /** 默认激活的 tab，'about' 或 'leaderboard'，默认 'about' */
-  defaultTab?: 'about' | 'leaderboard';
-  /** 数据来源，驱动榜单 tab 初始状态：'claude' / 'codex' / 'all'。默认 'claude'。 */
-  source?: 'claude' | 'codex' | 'all';
+  /** 默认激活的 tab：'claude' / 'codex' / 'about'，默认 'about' */
+  defaultTab?: 'claude' | 'codex' | 'about';
+  /** 数据来源，与 defaultTab 一致，决定哪个榜单有真实数据。 */
+  source?: 'claude' | 'codex';
 }
 
 // ── 功能特性（双语） ──────────────────────────────────────────
@@ -117,34 +117,12 @@ html[lang="zh"] [data-lang="en"] { display: none !important; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
-/* ── 来源子 Tab（Claude / Codex / 总榜）── */
-.source-tabs {
-  display: flex; justify-content: center; gap: 0;
-  border-bottom: 1px solid var(--border);
-  background: hsl(220 20% 7%);
-  padding: 0 1.5rem;
-}
-.source-tab {
-  display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.55rem 1.5rem;
-  font-size: 0.8rem; font-weight: 500;
-  color: var(--text-muted);
-  background: none; border: none; border-bottom: 2px solid transparent;
-  cursor: pointer; margin-bottom: -1px;
-  transition: color 0.15s, border-color 0.15s;
-  font-family: inherit;
-}
-.source-tab:hover { color: var(--text); }
-.source-tab.active-claude { color: var(--primary); border-bottom-color: var(--primary); }
-.source-tab.active-codex  { color: #10A37F;        border-bottom-color: #10A37F; }
-.source-tab.coming-soon   { color: var(--text-dim); cursor: default; font-size: 0.75rem; }
-.source-panel { display: none; }
-.source-panel.active { display: block; }
+/* Codex tab 绿色激活态 */
+.tab-btn.active-codex { color: #10A37F; border-bottom-color: #10A37F; }
 
-/* Codex 绿色主题覆盖 */
-#sp-codex .cost-val { color: #10A37F; }
-#sp-codex .lb-period { color: #10A37F; background: rgba(16,163,127,0.1); border-color: rgba(16,163,127,0.3); }
-#sp-all .lb-empty { color: var(--text-muted); }
+/* Codex 榜单绿色主题覆盖 */
+#tab-codex .cost-val { color: #10A37F; }
+#tab-codex .lb-period { color: #10A37F; background: rgba(16,163,127,0.1); border-color: rgba(16,163,127,0.3); }
 
 /* ── Hero ── */
 .hero {
@@ -564,41 +542,35 @@ td:last-child { color: var(--text-dim); font-family: 'Space Mono', monospace; fo
 }
 `;
 
-/** 页面交互脚本：Tab 切换、来源 Tab、语言切换、终端自动轮播、复制命令。 */
+/** 页面交互脚本：Tab 切换、语言切换、终端自动轮播、复制命令。 */
 const pageScript = `
 (function() {
-  // ── 页面 Tab（About / Leaderboard）──
+  // ── 统一 Tab 切换（claude / codex / about）──
+  // 切换 leaderboard tab 时如果 source 变了则整页跳转（重新加载正确数据）。
   function showTab(id) {
+    var currentSource = new URL(location.href).searchParams.get('source') || 'claude';
+    if ((id === 'claude' || id === 'codex') && currentSource !== id) {
+      // source 变了：重新加载带正确 ?source= 的 URL，保留 /leaderboard 路径
+      var url = new URL(location.href);
+      var base = url.pathname.startsWith('/leaderboard') ? url.pathname : '/leaderboard';
+      url.pathname = base;
+      url.searchParams.set('source', id);
+      url.hash = '';
+      location.href = url.toString();
+      return;
+    }
+    // 同 source 或切到 about：直接显示/隐藏面板
     document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
-    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.remove('active', 'active-codex');
+    });
     var panel = document.getElementById('tab-' + id);
     var btn   = document.querySelector('[data-tab="' + id + '"]');
     if (panel) panel.classList.add('active');
-    if (btn)   btn.classList.add('active');
-  }
-
-  // ── 来源 Tab（Claude / Codex / 总榜）──
-  // Switches the visible source panel AND updates the URL ?source= param.
-  function showSource(src) {
-    document.querySelectorAll('.source-panel').forEach(function(p) { p.classList.remove('active'); });
-    document.querySelectorAll('.source-tab').forEach(function(b) {
-      b.classList.remove('active-claude');
-      b.classList.remove('active-codex');
-    });
-    var panel = document.getElementById('sp-' + src);
-    var btn   = document.querySelector('[data-source="' + src + '"]');
-    if (panel) panel.classList.add('active');
     if (btn) {
-      if (src === 'codex') btn.classList.add('active-codex');
-      else if (src === 'claude') btn.classList.add('active-claude');
-      // 'all' coming-soon tab has no active highlight
+      if (id === 'codex') btn.classList.add('active-codex');
+      else btn.classList.add('active');
     }
-    // Update URL without full reload so share links work.
-    try {
-      var url = new URL(location.href);
-      url.searchParams.set('source', src);
-      history.replaceState(null, '', url.toString());
-    } catch(e) {}
   }
 
   // ── 语言切换 ──
@@ -637,10 +609,9 @@ const pageScript = `
     });
   }
 
-  window.showTab     = showTab;
-  window.showSource  = showSource;
-  window.toggleLang  = toggleLang;
-  window.copyCmd     = copyCmd;
+  window.showTab    = showTab;
+  window.toggleLang = toggleLang;
+  window.copyCmd    = copyCmd;
 
   document.addEventListener('DOMContentLoaded', function() {
     // 语言
@@ -650,17 +621,25 @@ const pageScript = `
     var lbtn = document.getElementById('lang-btn');
     if (lbtn) lbtn.textContent = lang === 'zh' ? 'EN' : '中文';
 
-    // 页面 Tab：hash 优先，否则使用服务端注入的默认值
+    // 初始 tab：URL ?source= 或 #about 优先，否则用服务端默认值
+    var urlSource = new URL(location.href).searchParams.get('source');
     var hash      = location.hash.replace('#', '');
-    var validTabs = ['leaderboard', 'about'];
-    var tab = validTabs.indexOf(hash) !== -1 ? hash : __DEFAULT_TAB__;
-    showTab(tab);
-
-    // 来源 Tab：URL ?source= 参数优先，否则使用服务端注入的默认值
-    var urlSource    = new URL(location.href).searchParams.get('source');
-    var validSources = ['claude', 'codex', 'all'];
-    var initSource = validSources.indexOf(urlSource) !== -1 ? urlSource : __DEFAULT_SOURCE__;
-    showSource(initSource);
+    var validTabs = ['claude', 'codex', 'about'];
+    var initTab;
+    if (hash === 'about') initTab = 'about';
+    else if (urlSource === 'codex') initTab = 'codex';
+    else if (urlSource === 'claude') initTab = 'claude';
+    else initTab = __DEFAULT_TAB__;
+    // 直接设置面板可见，不触发重载逻辑（页面已是对应 source）
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active', 'active-codex'); });
+    var panel = document.getElementById('tab-' + initTab);
+    var btn   = document.querySelector('[data-tab="' + initTab + '"]');
+    if (panel) panel.classList.add('active');
+    if (btn) {
+      if (initTab === 'codex') btn.classList.add('active-codex');
+      else btn.classList.add('active');
+    }
 
     // 终端轮播：先显示 overview，3.5 秒一循环
     showTermScreen('overview');
@@ -991,16 +970,16 @@ export const LeaderboardPage = ({ rows, period, defaultTab = 'about', source = '
   >
     <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
     <script dangerouslySetInnerHTML={{ __html: pageScript
-      .replace('__DEFAULT_TAB__', JSON.stringify(defaultTab))
-      .replace('__DEFAULT_SOURCE__', JSON.stringify(source))
+      .replace('__DEFAULT_TAB__', JSON.stringify(defaultTab ?? 'about'))
     }} />
 
-    {/* ── Tab 导航栏 ── */}
+    {/* ── Tab 导航栏（三 tab 扁平结构）── */}
     <div class="page-tabs">
-      <button class="tab-btn" data-tab="leaderboard" onclick="showTab('leaderboard')">
-        🏆&nbsp;
-        <span data-lang="en">Leaderboard</span>
-        <span data-lang="zh">排行榜</span>
+      <button class="tab-btn" data-tab="claude" onclick="showTab('claude')">
+        🤖&nbsp;Claude Code
+      </button>
+      <button class="tab-btn" data-tab="codex" onclick="showTab('codex')">
+        ✦&nbsp;Codex CLI
       </button>
       <button class="tab-btn" data-tab="about" onclick="showTab('about')">
         📦&nbsp;
@@ -1010,27 +989,9 @@ export const LeaderboardPage = ({ rows, period, defaultTab = 'about', source = '
     </div>
 
     {/* ══════════════════════════════════════════════════
-        Tab 1: 排行榜（默认）
+        Tab 1: Claude Code 排行榜
     ══════════════════════════════════════════════════ */}
-    <div id="tab-leaderboard" class="tab-panel">
-
-      {/* ── 来源子 Tab 栏（Claude Code / Codex CLI / 总榜预留）── */}
-      <div class="source-tabs">
-        <button class="source-tab" data-source="claude" onclick="showSource('claude')">
-          🤖&nbsp;Claude Code
-        </button>
-        <button class="source-tab" data-source="codex" onclick="showSource('codex')"
-                style="--codex-accent:#10A37F">
-          ✦&nbsp;Codex CLI
-        </button>
-        <button class="source-tab coming-soon" data-source="all" onclick="showSource('all')">
-          <span data-lang="en">All&nbsp;(coming soon)</span>
-          <span data-lang="zh">总榜（即将上线）</span>
-        </button>
-      </div>
-
-      {/* ── Source Panel: Claude Code ── */}
-      <div id="sp-claude" class="source-panel">
+      <div id="tab-claude" class="tab-panel">
         <div class="lb-header">
           <span class="lb-title">
             <span data-lang="en">Claude Code Rankings</span>
@@ -1083,8 +1044,10 @@ export const LeaderboardPage = ({ rows, period, defaultTab = 'about', source = '
         </div>
       </div>
 
-      {/* ── Source Panel: Codex CLI（空榜占位，数据由 URL ?source=codex 服务端注入）── */}
-      <div id="sp-codex" class="source-panel">
+    {/* ══════════════════════════════════════════════════
+        Tab 2: Codex CLI 排行榜
+    ══════════════════════════════════════════════════ */}
+      <div id="tab-codex" class="tab-panel">
         <div class="lb-header">
           <span class="lb-title" style="color:#10A37F">
             <span data-lang="en">Codex CLI Rankings</span>
@@ -1137,34 +1100,8 @@ export const LeaderboardPage = ({ rows, period, defaultTab = 'about', source = '
         </div>
       </div>
 
-      {/* ── Source Panel: 总榜（即将上线占位）── */}
-      <div id="sp-all" class="source-panel">
-        <div class="lb-header">
-          <span class="lb-title">
-            <span data-lang="en">All-Source Rankings</span>
-            <span data-lang="zh">总榜</span>
-          </span>
-          <span class="lb-period">{period}</span>
-        </div>
-        <div class="table-wrap">
-          <div class="lb-empty">
-            <span style="font-size:2rem">🚧</span><br />
-            <span data-lang="en">
-              Combined leaderboard — coming soon.<br />
-              <span style="color:var(--text-dim);font-size:0.8rem">Claude Code + Codex CLI usage in one ranking.</span>
-            </span>
-            <span data-lang="zh">
-              总榜功能即将上线。<br />
-              <span style="color:var(--text-dim);font-size:0.8rem">Claude Code + Codex CLI 合并排名，敬请期待。</span>
-            </span>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
     {/* ══════════════════════════════════════════════════
-        Tab 2: 产品介绍
+        Tab 3: 产品介绍
     ══════════════════════════════════════════════════ */}
     <div id="tab-about" class="tab-panel">
 
