@@ -119,9 +119,16 @@ func renderDailyCostChart(m Model, width int, chartH int) string {
 	if chartH < 4 {
 		chartH = 4
 	}
-	// Take the last N days that fit.
-	n := min(30, len(m.daily))
-	days := m.daily[len(m.daily)-n:]
+	// Filter to the last 30 calendar days (not last 30 data points).
+	// This prevents stale/old sessions from distorting the time axis.
+	cutoff := time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -29)
+	days := m.daily[:0:0] // same element type as m.daily, initially empty
+	for _, d := range m.daily {
+		if !d.Date.Before(cutoff) {
+			days = append(days, d)
+		}
+	}
+	n := len(days)
 
 	if n == 0 || width < 10 {
 		return mutedStyle.Render("  No data")
