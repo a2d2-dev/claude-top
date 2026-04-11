@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,20 +12,66 @@ import (
 const sessionDuration = 5 * time.Hour
 
 // BuildSessionBlocks groups usage entries into 5-hour session blocks.
+// Entries are first partitioned by (CWD, source) so each project gets its own
+// independent block sequence, then all blocks are merged and sorted by StartTime.
 // Entries must be sorted chronologically before calling this function.
 func BuildSessionBlocks(entries []data.UsageEntry) []data.SessionBlock {
 	if len(entries) == 0 {
 		return nil
 	}
 
+	// Pre-compute cost for every entry before grouping (entries are copied into
+	// per-group slices, so set CostUSD on the originals first).
+	for i := range entries {
+		entries[i].CostUSD = computeEntryCost(&entries[i])
+	}
+
+	// Group entries by (CWD, source) so each project gets its own rows.
+	type groupKey struct {
+		cwd    string
+		source string
+	}
+	groups := make(map[groupKey][]data.UsageEntry)
+	// groupOrder preserves first-seen order for deterministic output.
+	var groupOrder []groupKey
+	seen := make(map[groupKey]bool)
+	for _, e := range entries {
+		key := groupKey{cwd: e.CWD, source: e.Source}
+		if !seen[key] {
+			seen[key] = true
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key] = append(groups[key], e)
+	}
+
+	// Build independent block sequences for each (CWD, source) group.
+	var allBlocks []data.SessionBlock
+	for _, key := range groupOrder {
+		allBlocks = append(allBlocks, buildProjectBlocks(groups[key])...)
+	}
+
+	// Sort merged blocks chronologically for display.
+	sort.Slice(allBlocks, func(i, j int) bool {
+		return allBlocks[i].StartTime.Before(allBlocks[j].StartTime)
+	})
+
+	markActiveBlocks(allBlocks)
+	return allBlocks
+}
+
+// buildProjectBlocks builds 5-hour session blocks for a single (CWD, source) group.
+// Entries must be sorted chronologically.
+func buildProjectBlocks(entries []data.UsageEntry) []data.SessionBlock {
+	if len(entries) == 0 {
+		return nil
+	}
+
 	var blocks []data.SessionBlock
 	var current *data.SessionBlock
-	// cwdFreq tracks working-directory frequency for the current block.
 	cwdFreq := make(map[string]int)
 
 	for i := range entries {
 		entry := &entries[i]
-		entry.CostUSD = computeEntryCost(entry)
 
 		if current == nil || needsNewBlock(current, entry) {
 			if current != nil {
@@ -32,7 +79,7 @@ func BuildSessionBlocks(entries []data.UsageEntry) []data.SessionBlock {
 				blocks = append(blocks, *current)
 				cwdFreq = make(map[string]int)
 
-				// Insert a gap block if there's a significant pause.
+				// Insert a gap block between pauses within the same project.
 				if gap := buildGap(current, entry); gap != nil {
 					blocks = append(blocks, *gap)
 				}
@@ -51,7 +98,6 @@ func BuildSessionBlocks(entries []data.UsageEntry) []data.SessionBlock {
 		blocks = append(blocks, *current)
 	}
 
-	markActiveBlocks(blocks)
 	return blocks
 }
 
@@ -83,10 +129,14 @@ func needsNewBlock(block *data.SessionBlock, entry *data.UsageEntry) bool {
 func newBlock(entry *data.UsageEntry) *data.SessionBlock {
 	start := roundToHour(entry.Timestamp)
 	end := start.Add(sessionDuration)
-	// Include source in ID so same-hour blocks from different tools are distinct.
+	// Include source and CWD in ID so same-hour blocks from different projects
+	// or tools are distinct and don't collide.
 	id := start.Format(time.RFC3339)
 	if entry.Source != "" {
 		id += ":" + entry.Source
+	}
+	if entry.CWD != "" {
+		id += ":" + entry.CWD
 	}
 	return &data.SessionBlock{
 		ID:            id,
