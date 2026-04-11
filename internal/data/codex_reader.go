@@ -62,8 +62,11 @@ type codexLastTokenUsage struct {
 
 // codexTokenCountInfo is the "info" field inside a token_count event.
 type codexTokenCountInfo struct {
-	// LastTokenUsage is the cumulative token usage snapshot for deduplication.
+	// LastTokenUsage is the per-turn token delta (preferred).
 	LastTokenUsage *codexLastTokenUsage `json:"last_token_usage"`
+	// TotalTokenUsage is the cumulative session total (fallback when LastTokenUsage is nil).
+	// Differential calculation (current - previous) is applied to extract per-turn counts.
+	TotalTokenUsage *codexLastTokenUsage `json:"total_token_usage"`
 }
 
 // codexParseState holds parser state while processing a single Codex JSONL file.
@@ -81,6 +84,10 @@ type codexParseState struct {
 	// It is flushed (emitted) when the next user_message arrives or at end-of-file.
 	// This ensures only the FINAL snapshot per turn is recorded, not every streaming update.
 	pendingEntry *UsageEntry
+	// prevTotalUsage tracks the last seen total_token_usage for differential calculation.
+	// Used as a fallback when last_token_usage is nil — the per-turn delta is computed as
+	// (current total) - (previous total).
+	prevTotalUsage codexLastTokenUsage
 	// fileDateFallback is midnight UTC derived from the YYYY/MM/DD directory structure.
 	fileDateFallback time.Time
 }
@@ -132,12 +139,16 @@ func parseCodexFile(path string) ([]UsageEntry, error) {
 // processCodexEvent updates the parse state based on the event type.
 //
 // Event ordering in a Codex session file:
-//   user_message → turn_context → token_count (repeating, streaming) → user_message → …
+//   [user_message →] turn_context → token_count (repeating, streaming) → …
 //
 // Strategy: buffer the latest token_count snapshot in state.pendingEntry (overwriting
-// each intermediate value). Flush (emit) the pending entry only when a new user_message
-// arrives — that signals the previous AI turn is complete. The final turn in the file
-// is flushed by parseCodexFile after the scanner loop ends.
+// each intermediate value). Flush (emit) the pending entry when either:
+//  1. A new turn_context arrives — reliable flush boundary present in all CLI versions.
+//  2. A user_message arrives — also used as a flush point when present.
+//  3. End of file — flushes the final AI turn.
+//
+// Older Rust-based Codex CLI emits user_message events between turns; the TypeScript SDK
+// (codex_sdk_ts) may not. Flushing on turn_context makes both work correctly.
 func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) (UsageEntry, bool) {
 	switch evt.Type {
 	case "session_meta":
@@ -152,9 +163,18 @@ func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) 
 		}
 
 	case "turn_context":
+		// A new AI turn is starting. Flush any pending entry from the previous turn.
+		// This handles sessions where user_message events are absent (e.g. TypeScript SDK
+		// interactive mode) — turn_context is emitted at the start of every AI turn
+		// regardless of CLI implementation, so it is the reliable flush boundary.
+		flushed := state.pendingEntry
+		state.pendingEntry = nil
 		var ctx codexTurnContext
 		if err := json.Unmarshal(evt.Payload, &ctx); err == nil && ctx.Model != "" {
 			state.currentModel = ctx.Model
+		}
+		if flushed != nil {
+			return *flushed, true
 		}
 
 	case "event_msg":
@@ -165,7 +185,8 @@ func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) 
 		}
 		switch inner.SubType {
 		case "user_message":
-			// A new user turn begins. Flush the previous AI turn's pending entry first.
+			// A new user turn begins. Flush any pending AI turn entry (secondary flush point;
+			// turn_context is the primary flush boundary but user_message also works here).
 			flushed := state.pendingEntry
 			state.pendingEntry = nil
 			if inner.Message != "" {
@@ -187,15 +208,52 @@ func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) 
 // updatePendingEntry parses a token_count event and stores it as state.pendingEntry,
 // overwriting any previous intermediate value. Non-final streaming snapshots are silently
 // discarded when the next snapshot arrives.
+//
+// Token source priority:
+//  1. last_token_usage — per-turn delta (preferred, present in Codex CLI Rust ≥ 0.50).
+//  2. total_token_usage differential — used when last_token_usage is nil; computes the
+//     per-turn delta as (current cumulative total) - (previous cumulative total).
 func updatePendingEntry(infoRaw json.RawMessage, timestamp string, state *codexParseState, filePath string) {
 	if len(infoRaw) == 0 {
 		return
 	}
 	var info codexTokenCountInfo
-	if err := json.Unmarshal(infoRaw, &info); err != nil || info.LastTokenUsage == nil {
+	if err := json.Unmarshal(infoRaw, &info); err != nil {
 		return
 	}
-	usage := info.LastTokenUsage
+
+	var usage *codexLastTokenUsage
+
+	if info.LastTokenUsage != nil {
+		// Preferred path: per-turn delta is already computed by the CLI.
+		usage = info.LastTokenUsage
+	} else if info.TotalTokenUsage != nil {
+		// Fallback: compute per-turn delta from cumulative session total.
+		cur := info.TotalTokenUsage
+		delta := codexLastTokenUsage{
+			InputTokens:           cur.InputTokens - state.prevTotalUsage.InputTokens,
+			CachedInputTokens:     cur.CachedInputTokens - state.prevTotalUsage.CachedInputTokens,
+			OutputTokens:          cur.OutputTokens - state.prevTotalUsage.OutputTokens,
+			ReasoningOutputTokens: cur.ReasoningOutputTokens - state.prevTotalUsage.ReasoningOutputTokens,
+		}
+		// Guard against negative deltas caused by session resets or file truncation.
+		if delta.InputTokens < 0 {
+			delta.InputTokens = 0
+		}
+		if delta.CachedInputTokens < 0 {
+			delta.CachedInputTokens = 0
+		}
+		if delta.OutputTokens < 0 {
+			delta.OutputTokens = 0
+		}
+		if delta.ReasoningOutputTokens < 0 {
+			delta.ReasoningOutputTokens = 0
+		}
+		state.prevTotalUsage = *cur
+		usage = &delta
+	} else {
+		return
+	}
 
 	// Skip all-zero snapshots (no actual token activity).
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 &&

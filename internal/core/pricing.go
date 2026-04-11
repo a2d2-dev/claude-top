@@ -16,13 +16,23 @@ type modelPricing struct {
 }
 
 // openAIPricing maps normalized OpenAI model names to pricing tiers.
-// Prices per million tokens in USD. Source: OpenAI pricing page (2026).
+// Prices per million tokens in USD. Source: OpenAI pricing page / splitrail (2026).
 // CacheCreation = 0 (OpenAI cache is read-only from Codex CLI perspective).
 var openAIPricing = map[string]modelPricing{
-	// codex-mini-latest
+	// codex-mini-latest / gpt-5.1-codex-mini
 	"codex-mini": {Input: 1.50, Output: 6.00, CacheCreation: 0, CacheRead: 0.375},
-	// codex-latest (full)
+	// codex-latest (full) / gpt-5-codex — legacy fallback
 	"codex": {Input: 3.00, Output: 12.00, CacheCreation: 0, CacheRead: 0.750},
+	// gpt-5.2 / gpt-5.2-codex
+	"gpt-5.2": {Input: 1.75, Output: 14.00, CacheCreation: 0, CacheRead: 0.175},
+	// gpt-5.3-codex and variants (gpt-5.3-codex-spark, gpt-5.3-codex-lightning, …)
+	"gpt-5.3-codex": {Input: 1.75, Output: 14.00, CacheCreation: 0, CacheRead: 0.175},
+	// gpt-5.4: tiered pricing; we use the standard tier ($2.50 input, $0.25 cache).
+	// Large-context requests (>272k tokens) are billed at $5.00/$0.50 — use gpt-5.4-high
+	// for a conservative upper-bound estimate.
+	"gpt-5.4": {Input: 2.50, Output: 15.00, CacheCreation: 0, CacheRead: 0.25},
+	// gpt-5.4-mini
+	"gpt-5.4-mini": {Input: 1.50, Output: 6.00, CacheCreation: 0, CacheRead: 0.375},
 }
 
 // knownPricing maps normalised model names to their pricing tier.
@@ -65,17 +75,38 @@ func CalculateCost(model string, inputTokens, outputTokens, cacheCreate, cacheRe
 }
 
 // pricingForModel returns the pricing tier for a given model name.
-// Checks OpenAI models first (contains "gpt" or "codex"), then falls through to Anthropic.
-// Falls back to sonnet pricing for unknown models.
+// For OpenAI models (contains "gpt" or "codex") we first try specific versioned entries
+// to get accurate pricing, then fall back to generic tiers.
+// Falls back to sonnet pricing for completely unknown models.
 func pricingForModel(model string) modelPricing {
 	lower := strings.ToLower(model)
-	// Check OpenAI models before Anthropic checks.
+
+	// OpenAI / Codex models — check specific versions before generic fallbacks.
 	if strings.Contains(lower, "gpt") || strings.Contains(lower, "codex") {
+		// gpt-5.4-mini
+		if strings.Contains(lower, "5.4") && strings.Contains(lower, "mini") {
+			return openAIPricing["gpt-5.4-mini"]
+		}
+		// gpt-5.4 (any variant)
+		if strings.Contains(lower, "5.4") {
+			return openAIPricing["gpt-5.4"]
+		}
+		// gpt-5.3-codex and variants (gpt-5.3-codex-spark, gpt-5.3-codex-lightning, …)
+		if strings.Contains(lower, "5.3") && strings.Contains(lower, "codex") {
+			return openAIPricing["gpt-5.3-codex"]
+		}
+		// gpt-5.2 and gpt-5.2-codex
+		if strings.Contains(lower, "5.2") {
+			return openAIPricing["gpt-5.2"]
+		}
+		// codex-mini-latest / gpt-5.1-codex-mini / any remaining mini model
 		if strings.Contains(lower, "mini") {
 			return openAIPricing["codex-mini"]
 		}
+		// codex-latest / gpt-5-codex / legacy fallback
 		return openAIPricing["codex"]
 	}
+
 	if strings.Contains(lower, "opus") {
 		return knownPricing["opus"]
 	}
