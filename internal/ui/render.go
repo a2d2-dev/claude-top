@@ -266,6 +266,7 @@ func histColWidths(innerW int) [6]int {
 
 // historyDataRow renders one history table row.
 // showSource controls whether a [C]/[X] source prefix is prepended (multi-source mode).
+// Active (in-progress) blocks are prefixed with ● instead of a space.
 func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bool) string {
 	updatedAt := s.StartTime
 	if s.ActualEndTime != nil {
@@ -290,15 +291,16 @@ func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bo
 		parts[i] = mutedStyle.Width(colW[i]).Render(truncateStr(c, colW[i]))
 	}
 
-	// Build prefix: cursor indicator + optional source tag.
-	cursorIndicator := "  "
-	if cursor {
-		cursorIndicator = "▶ "
+	// activeMarker is shown in the leftmost character of the prefix for in-progress blocks.
+	activeMarker := " "
+	if s.IsActive {
+		activeMarker = "●"
 	}
 
+	// Build prefix: [active] [cursor/▶] [optional source tag]
 	var row string
 	if showSource {
-		// Source tag: [C] for claude, [X] for codex, [?] for unknown.
+		// Source tag: [C] for claude, [X] for codex.
 		var sourceTag string
 		switch s.Source {
 		case "codex":
@@ -306,13 +308,21 @@ func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bo
 		default:
 			sourceTag = "[C]"
 		}
-		prefix := cursorIndicator[:1] + sourceTag + " "
+		var prefix string
 		if cursor {
 			prefix = "▶" + sourceTag + " "
+		} else {
+			prefix = activeMarker + sourceTag + " "
 		}
 		row = prefix + strings.Join(parts, " ")
 	} else {
-		row = cursorIndicator + strings.Join(parts, " ")
+		var prefix string
+		if cursor {
+			prefix = "▶ "
+		} else {
+			prefix = activeMarker + " "
+		}
+		row = prefix + strings.Join(parts, " ")
 	}
 
 	// Apply cursor highlight to the entire row as a single render call to avoid

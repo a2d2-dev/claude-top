@@ -602,12 +602,14 @@ func (m Model) handleDailyKey(key string) (tea.Model, tea.Cmd) {
 
 // ── Derived data ──────────────────────────────────────────────────────────────
 
-// sessionRows returns all historical (non-active, non-gap) blocks sorted per current settings.
+// sessionRows returns all non-gap blocks (including active ones) sorted per current settings.
+// Active blocks are included so the user can see in-progress sessions; they are rendered
+// with a ● indicator in the table.
 func (m Model) sessionRows() []data.SessionBlock {
 	var rows []data.SessionBlock
 	for i := range m.blocks {
 		b := m.blocks[i]
-		if b.IsGap || b.IsActive {
+		if b.IsGap {
 			continue
 		}
 		// Apply source filter toggles.
