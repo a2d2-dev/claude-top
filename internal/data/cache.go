@@ -4,7 +4,29 @@ import (
 	"encoding/gob"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
+)
+
+// ── in-memory cache layer ──────────────────────────────────────────────────────
+//
+// On each 10-second refresh tick the TUI calls LoadEntries / LoadCodexEntries.
+// Both call loadCache, which gob-decodes the entire cache file (~60-200 ms for
+// 10 k sessions). If nothing changed on disk, this work is wasted.
+//
+// inMemStore keeps the last decoded store per cache file together with the file's
+// mtime at decode time. loadCache checks the mtime first: if it hasn't changed,
+// the in-memory copy is returned directly (zero decode overhead).
+
+type inMemEntry struct {
+	mtime time.Time
+	store cacheStore
+}
+
+// inMemCache maps cachePath → last decoded store.
+var (
+	inMemCacheMu sync.Mutex
+	inMemCache   = make(map[string]inMemEntry)
 )
 
 // cacheVersion must be bumped whenever UsageEntry or fileCache change shape,
@@ -54,9 +76,27 @@ func codexCachePath() string {
 
 // loadCache reads the cache from disk. Returns an empty store on any error
 // (missing file, version mismatch, corrupt data) so the caller can rebuild.
+//
+// An in-memory layer avoids repeated gob decodes on consecutive 10-second
+// refresh ticks when the cache file has not been updated.
 func loadCache(cachePath string) cacheStore {
 	empty := cacheStore{Version: cacheVersion, Files: make(map[string]fileCache)}
+	if cachePath == "" {
+		return empty
+	}
 
+	// Check current mtime before acquiring the lock to minimise contention.
+	currentMtime := cacheFileModTime(cachePath)
+
+	inMemCacheMu.Lock()
+	if mem, ok := inMemCache[cachePath]; ok && !currentMtime.IsZero() && mem.mtime.Equal(currentMtime) {
+		hit := mem.store
+		inMemCacheMu.Unlock()
+		return hit
+	}
+	inMemCacheMu.Unlock()
+
+	// Cache miss — decode from disk.
 	f, err := os.Open(cachePath)
 	if err != nil {
 		return empty
@@ -70,11 +110,20 @@ func loadCache(cachePath string) cacheStore {
 	if store.Version != cacheVersion {
 		return empty
 	}
+
+	// Store in memory for subsequent calls.
+	if !currentMtime.IsZero() {
+		inMemCacheMu.Lock()
+		inMemCache[cachePath] = inMemEntry{mtime: currentMtime, store: store}
+		inMemCacheMu.Unlock()
+	}
+
 	return store
 }
 
 // saveCache writes store to cachePath, creating parent directories as needed.
 // Errors are silently ignored; a missing cache just means a full parse next time.
+// The in-memory cache entry is invalidated so the next loadCache re-reads from disk.
 func saveCache(cachePath string, store cacheStore) {
 	if cachePath == "" {
 		return
@@ -87,7 +136,25 @@ func saveCache(cachePath string, store cacheStore) {
 		return
 	}
 	defer f.Close()
-	_ = gob.NewEncoder(f).Encode(store)
+	if gob.NewEncoder(f).Encode(store) != nil {
+		return
+	}
+
+	// Invalidate in-memory entry; the file's mtime has just changed.
+	inMemCacheMu.Lock()
+	delete(inMemCache, cachePath)
+	inMemCacheMu.Unlock()
+}
+
+// cacheFileModTime returns the modification time of the cache file at cachePath,
+// or zero time if the file cannot be stat'd. Used to skip unnecessary gob decodes
+// when the cache file hasn't changed since the last load.
+func cacheFileModTime(cachePath string) time.Time {
+	info, err := os.Stat(cachePath)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
 }
 
 // pruneCache removes entries for files that no longer exist in knownPaths.

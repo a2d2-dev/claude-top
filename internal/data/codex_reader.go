@@ -338,12 +338,11 @@ func LoadCodexEntries(dataPath string) ([]UsageEntry, error) {
 	}
 
 	// Parse stale/new files in parallel using a worker pool (mirrors LoadEntries pattern).
+	// Cap at 4 workers: parsing is I/O-bound and saturating all cores makes the TUI
+	// unresponsive on large session sets.
 	results := make([]parsedFile, len(toparse))
 	if len(toparse) > 0 {
-		workers := runtime.NumCPU()
-		if workers > len(toparse) {
-			workers = len(toparse)
-		}
+		workers := min(runtime.NumCPU(), 4, len(toparse))
 		type job struct {
 			idx  int
 			path string

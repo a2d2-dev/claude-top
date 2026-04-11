@@ -100,9 +100,11 @@ func LoadEntries(dataPath string) ([]UsageEntry, error) {
 	}
 
 	// Parse stale/new files in parallel using a worker pool.
+	// Cap at 4 workers regardless of CPU count: parsing is I/O-bound and
+	// saturating all cores makes the TUI unresponsive on large session sets.
 	results := make([]parsedFile, len(toparse))
 	if len(toparse) > 0 {
-		workers := runtime.NumCPU()
+		workers := min(runtime.NumCPU(), 4)
 		if workers > len(toparse) {
 			workers = len(toparse)
 		}
