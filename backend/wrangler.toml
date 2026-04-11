@@ -19,3 +19,10 @@ id = "${CLOUDFLARE_KV_NAMESPACE_ID}"
 # They are never stored in this file.
 #   wrangler secret put JWT_SECRET
 #   wrangler secret put GITHUB_CLIENT_ID
+
+[observability.logs]
+enabled = false
+invocation_logs = true
+
+[observability.traces]
+enabled = false

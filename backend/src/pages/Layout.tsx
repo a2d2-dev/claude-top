@@ -172,6 +172,12 @@ export const Layout = ({ title, ogMeta, navRight, children }: LayoutProps) => (
         rel="stylesheet"
       />
       <style dangerouslySetInnerHTML={{ __html: sharedStyles }} />
+      {/* Cloudflare Web Analytics */}
+      <script
+        defer
+        src="https://static.cloudflareinsights.com/beacon.min.js"
+        data-cf-beacon='{"token": "19c63d74703a4d69aa5642a289748139"}'
+      />
     </head>
     <body>
       <nav>
