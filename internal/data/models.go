@@ -108,6 +108,17 @@ type DailyStats struct {
 	MessageCount int
 }
 
+// MonthlyStats aggregates token usage and cost for a single calendar month.
+type MonthlyStats struct {
+	// Date is the first day of the month, truncated to midnight local time.
+	Date         time.Time
+	TokenCounts  TokenCounts
+	CostUSD      float64
+	MessageCount int
+	// DayCount is the number of distinct active days within the month.
+	DayCount int
+}
+
 // DurationMinutes returns the block's duration in minutes.
 func (b *SessionBlock) DurationMinutes() float64 {
 	end := b.EndTime

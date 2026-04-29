@@ -55,6 +55,8 @@ func RenderDashboard(m Model) string {
 		content = renderSessions(m, contentH)
 	case tabDaily:
 		content = renderDaily(m, contentH)
+	case tabMonthly:
+		content = renderMonthly(m, contentH)
 	default:
 		content = renderOverview(m, contentH)
 	}
@@ -140,8 +142,10 @@ func renderFooter(m Model) string {
 		}
 	case tabDaily:
 		hint = "  ↑↓ cursor  Tab switch  ,/o settings  q quit"
+	case tabMonthly:
+		hint = "  ↑↓ cursor  Tab switch  ,/o settings  q quit"
 	default:
-		hint = "  1-3 tabs  Tab switch  u upload  ,/o settings  r refresh  q quit"
+		hint = "  1-4 tabs  Tab switch  u upload  ,/o settings  r refresh  q quit"
 	}
 	return mutedStyle.Render(hint)
 }

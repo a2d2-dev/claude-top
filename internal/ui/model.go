@@ -26,10 +26,11 @@ const (
 	tabOverview tabID = iota
 	tabSessions
 	tabDaily
+	tabMonthly
 	tabCount
 )
 
-var tabNames = []string{"Overview", "Sessions", "Daily"}
+var tabNames = []string{"Overview", "Sessions", "Daily", "Monthly"}
 
 // ── View / sort enums (Sessions tab) ─────────────────────────────────────────
 
@@ -226,8 +227,10 @@ type Model struct {
 	tab tabID
 
 	// Per-tab state.
-	sessions sessionsState
-	dailyCur int // cursor row in Daily tab
+	sessions   sessionsState
+	dailyCur   int // cursor row in Daily tab
+	monthly    []data.MonthlyStats
+	monthlyCur int // cursor row in Monthly tab
 
 	// Auth overlay — active when auth.phase != authIdle.
 	authOverlay authState
@@ -285,6 +288,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err == nil && len(msg.blocks) > 0 {
 				m.blocks = msg.blocks
 				m.daily = core.BuildDailyStats(m.blocks)
+				m.monthly = core.BuildMonthlyStats(m.blocks)
 				m.loading = false
 			}
 			return m, nil
@@ -299,6 +303,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.blocks = msg.blocks
 			m.daily = core.BuildDailyStats(m.blocks)
+			m.monthly = core.BuildMonthlyStats(m.blocks)
 			m.err = nil
 		}
 		return m, nil
@@ -368,6 +373,9 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	case "3":
 		m.tab = tabDaily
 		return m, nil
+	case "4":
+		m.tab = tabMonthly
+		return m, nil
 	case "tab":
 		m.tab = (m.tab + 1) % tabCount
 		return m, nil
@@ -382,6 +390,8 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m.handleSessionsKey(key)
 	case tabDaily:
 		return m.handleDailyKey(key)
+	case tabMonthly:
+		return m.handleMonthlyKey(key)
 	}
 	return m, nil
 }
@@ -595,6 +605,27 @@ func (m Model) handleDailyKey(key string) (tea.Model, tea.Cmd) {
 	case "G", "end":
 		if len(m.daily) > 0 {
 			m.dailyCur = len(m.daily) - 1
+		}
+	}
+	return m, nil
+}
+
+// handleMonthlyKey processes keys when the Monthly tab is active.
+func (m Model) handleMonthlyKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		if m.monthlyCur > 0 {
+			m.monthlyCur--
+		}
+	case "down", "j":
+		if m.monthlyCur < len(m.monthly)-1 {
+			m.monthlyCur++
+		}
+	case "g", "home":
+		m.monthlyCur = 0
+	case "G", "end":
+		if len(m.monthly) > 0 {
+			m.monthlyCur = len(m.monthly) - 1
 		}
 	}
 	return m, nil
