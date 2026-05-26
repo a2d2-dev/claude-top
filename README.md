@@ -11,11 +11,13 @@ Terminal UI for monitoring [Claude Code](https://claude.ai/code) and [Codex CLI]
 ## Features
 
 - **Overview** — active session progress bar, burn rate, time remaining; per-source stats when using `--source all`
-- **Sessions** — sortable history table with `[C]`/`[X]` source badges, drill into any session for per-message cost breakdown
+- **Sessions** — sortable history table with `[C]`/`[X]` source badges, source filter toggles, sessions grouped per project (CWD+source), drill into any session for per-message cost breakdown
 - **Daily** — 52-week contribution graph, cost summary, scrollable per-day table
+- **Monthly** — per-month aggregation with cost trend, token totals, and active-day count
 - **Message Detail** — full user prompt, tool calls & results, assistant response loaded on demand (Claude Code sessions)
 - **Codex CLI support** — reads `~/.codex/sessions`, calculates cost from OpenAI pricing
 - **Leaderboard upload** — compete globally at [claude-top.a2d2.dev](https://claude-top.a2d2.dev); Claude Code and Codex CLI tracked on separate leaderboards, per-source rank shown on success
+- **Self-update** — `claude-top update` downloads the latest release with progress bar
 - Chart highlights the selected message's position in time with intermediate X-axis ticks and cross-midnight date labels
 - Auto-refreshes every 10 seconds; press `r` to force refresh
 
@@ -62,13 +64,16 @@ chmod +x claude-top-*
 
 ```
 claude-top [flags]
+claude-top update    # download and install the latest release
+claude-top version   # print the current version
 
 Flags:
-  --plan         Subscription plan: pro, max5, max20        (default: pro)
-  --data-path    Path to Claude projects dir                (default: ~/.claude/projects)
+  --claude-path  Path to Claude projects dir                (default: ~/.claude/projects)
   --source       Data source: all, claude, or codex         (default: all)
   --codex-path   Path to Codex CLI sessions dir             (default: ~/.codex/sessions)
 ```
+
+Subscription plan (pro / max5 / max20) is configured inside the TUI — press `,` or `o` to open settings.
 
 ### Examples
 
@@ -87,7 +92,7 @@ claude-top --source codex
 
 | Key | Action |
 |-----|--------|
-| `1` / `2` / `3` | Switch tabs |
+| `1` / `2` / `3` / `4` | Switch tabs (Overview / Sessions / Daily / Monthly) |
 | `Tab` / `Shift+Tab` | Cycle tabs |
 | `↑` / `↓` or `k` / `j` | Move cursor |
 | `PgUp` / `PgDn` | Page up / down (Sessions) |
@@ -110,6 +115,21 @@ Upload your monthly stats to compete globally at [claude-top.a2d2.dev](https://c
 - Only aggregated token counts and costs are uploaded — no prompts, file paths, or session content
 
 ## Changelog
+
+### v0.4.0
+
+- **feat(monthly)**: New Monthly tab — per-month aggregation with cost trend, token totals, and active-day count
+
+### v0.3.2
+
+- **feat(update)**: `claude-top update` self-updates to the latest release with a download progress bar
+- **fix(sessions)**: Group sessions by project (CWD+source) independently — Claude and Codex sessions in the same directory no longer collide
+- **fix(sessions)**: Show active (in-progress) blocks in the Sessions list
+
+### v0.3.0
+
+- **feat**: Codex exec-mode warning, Plan setting in the TUI settings panel, `--claude-path` flag (renamed from `--data-path`)
+- **perf**: Added benchmark suite and fixed CPU saturation on large session sets
 
 ### v0.2.2
 
