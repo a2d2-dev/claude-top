@@ -57,6 +57,8 @@ func RenderDashboard(m Model) string {
 		content = renderDaily(m, contentH)
 	case tabMonthly:
 		content = renderMonthly(m, contentH)
+	case tabChat:
+		content = renderChat(m, contentH)
 	default:
 		content = renderOverview(m, contentH)
 	}
@@ -144,8 +146,16 @@ func renderFooter(m Model) string {
 		hint = "  ↑↓ cursor  Tab switch  ,/o settings  q quit"
 	case tabMonthly:
 		hint = "  ↑↓ cursor  Tab switch  ,/o settings  q quit"
+	case tabChat:
+		if m.chat.searchInput {
+			hint = "  Type to search  Enter confirm  Esc clear  ↑↓ navigate"
+		} else if m.chat.showDetail {
+			hint = "  Esc back  s jump to session context"
+		} else {
+			hint = "  f search  ↑↓ cursor  Enter detail  Esc clear  q quit"
+		}
 	default:
-		hint = "  1-4 tabs  Tab switch  u upload  ,/o settings  r refresh  q quit"
+		hint = "  1-5 tabs  Tab switch  u upload  ,/o settings  r refresh  q quit"
 	}
 	return mutedStyle.Render(hint)
 }
@@ -885,6 +895,33 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, mn)
 	}
 	return fmt.Sprintf("%dm", mn)
+}
+
+// highlightMatch renders text with the first occurrence of term highlighted.
+// Uses case-insensitive matching. Falls back to base style if no match found.
+func highlightMatch(text, term string, baseStyle lipgloss.Style, maxW int) string {
+	lower := strings.ToLower(text)
+	termLower := strings.ToLower(term)
+	idx := strings.Index(lower, termLower)
+	if idx < 0 {
+		return baseStyle.MaxWidth(maxW).Render(text)
+	}
+	before := text[:idx]
+	match := text[idx : idx+len(term)]
+	after := text[idx+len(term):]
+	return baseStyle.Render(before) +
+		searchMatchStyle.Render(match) +
+		baseStyle.MaxWidth(max(0, maxW-idx-len(term))).Render(after)
+}
+
+// collapseWhitespace replaces newlines and tabs with spaces in a string.
+func collapseWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func max(a, b int) int {

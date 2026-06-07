@@ -83,6 +83,32 @@ var (
 			Bold(true).
 			Foreground(colorAccent).
 			Padding(0, 2)
+
+	// Search styles (used by Chat tab).
+	searchInputStyle = lipgloss.NewStyle().
+				Foreground(colorText).
+				Bold(true)
+
+	searchCursorStyle = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Bold(true)
+
+	searchMatchStyle = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Bold(true).
+				Underline(true)
+
+	// Search box — bordered input field for visibility.
+	searchBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder).
+			Padding(0, 1)
+
+	// Search box active — bright border when typing.
+	searchBoxActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorAccent).
+				Padding(0, 1)
 )
 
 // ── Color helpers ─────────────────────────────────────────────────────────────

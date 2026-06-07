@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,10 +28,11 @@ const (
 	tabSessions
 	tabDaily
 	tabMonthly
+	tabChat
 	tabCount
 )
 
-var tabNames = []string{"Overview", "Sessions", "Daily", "Monthly"}
+var tabNames = []string{"Overview", "Sessions", "Daily", "Monthly", "Chat"}
 
 // ── View / sort enums (Sessions tab) ─────────────────────────────────────────
 
@@ -199,6 +201,17 @@ type sessionsState struct {
 	showCodex  bool
 }
 
+// chatState holds all UI state for the Chat tab.
+type chatState struct {
+	searchTerm       string             // current search query
+	searchInput      bool               // true when search input is actively accepting keystrokes
+	cursor           int                // selected row in the message list
+	selectedEntry    *data.UsageEntry   // entry under cursor (for detail loading)
+	msgDetail        *data.MessageDetail // loaded on-demand when viewing message detail
+	msgDetailLoading bool               // true while async detail load is in flight
+	showDetail       bool               // true when viewing full message content
+}
+
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 // Model is the bubbletea application model.
@@ -231,6 +244,7 @@ type Model struct {
 	dailyCur   int // cursor row in Daily tab
 	monthly    []data.MonthlyStats
 	monthlyCur int // cursor row in Monthly tab
+	chat       chatState // Chat tab state
 
 	// Auth overlay — active when auth.phase != authIdle.
 	authOverlay authState
@@ -321,9 +335,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleUploadResult(msg)
 
 	case msgDetailLoadedMsg:
-		m.sessions.msgDetail = msg.detail
-		m.sessions.msgDetailLoading = false
-		m.sessions.view = viewMsgDetail
+		if m.tab == tabChat {
+			m.chat.msgDetail = msg.detail
+			m.chat.msgDetailLoading = false
+			m.chat.showDetail = true
+		} else {
+			m.sessions.msgDetail = msg.detail
+			m.sessions.msgDetailLoading = false
+			m.sessions.view = viewMsgDetail
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -347,6 +367,12 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	// Settings overlay captures all keys while active.
 	if m.settings.phase != settingsIdle {
 		return m.handleSettingsKeyWrapper(key)
+	}
+
+	// Chat search input captures all keys — must be before global shortcuts
+	// to prevent 'q', '1-4', 'r', etc. from triggering actions while typing.
+	if m.tab == tabChat && m.chat.searchInput {
+		return m.handleChatSearchInput(key)
 	}
 
 	// Global keys.
@@ -376,6 +402,9 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	case "4":
 		m.tab = tabMonthly
 		return m, nil
+	case "5":
+		m.tab = tabChat
+		return m, nil
 	case "tab":
 		m.tab = (m.tab + 1) % tabCount
 		return m, nil
@@ -390,6 +419,8 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m.handleSessionsKey(key)
 	case tabDaily:
 		return m.handleDailyKey(key)
+	case tabChat:
+		return m.handleChatKey(key)
 	case tabMonthly:
 		return m.handleMonthlyKey(key)
 	}
@@ -629,6 +660,218 @@ func (m Model) handleMonthlyKey(key string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// ── Chat tab handlers ────────────────────────────────────────────────────────
+
+// handleChatKey processes keys when the Chat tab is active.
+func (m Model) handleChatKey(key string) (tea.Model, tea.Cmd) {
+	// Detail view: Esc goes back, s jumps to session context.
+	if m.chat.showDetail {
+		switch key {
+		case "esc", "backspace":
+			m.chat.showDetail = false
+			m.chat.msgDetail = nil
+		case "s":
+			// Jump to Sessions tab, locate the session containing this message,
+			// open its detail view, and position cursor on the matching message.
+			if m.chat.selectedEntry != nil {
+				m = m.jumpToSessionDetail(*m.chat.selectedEntry)
+			}
+		}
+		return m, nil
+	}
+
+	msgs := m.chatMessages()
+
+	switch key {
+	case "f", "/":
+		// Activate search input.
+		m.chat.searchInput = true
+		return m, nil
+	case "esc":
+		// Clear search term if active.
+		if m.chat.searchTerm != "" {
+			m.chat.searchTerm = ""
+			m.chat.cursor = 0
+			return m, nil
+		}
+	case "up", "k":
+		if m.chat.cursor > 0 {
+			m.chat.cursor--
+		}
+	case "down", "j":
+		if m.chat.cursor < len(msgs)-1 {
+			m.chat.cursor++
+		}
+	case "pgup":
+		visible := m.chatVisibleRows()
+		m.chat.cursor -= visible
+		if m.chat.cursor < 0 {
+			m.chat.cursor = 0
+		}
+	case "pgdown":
+		visible := m.chatVisibleRows()
+		m.chat.cursor += visible
+		if m.chat.cursor >= len(msgs) {
+			m.chat.cursor = len(msgs) - 1
+		}
+		if m.chat.cursor < 0 {
+			m.chat.cursor = 0
+		}
+	case "g", "home":
+		m.chat.cursor = 0
+	case "G", "end":
+		if len(msgs) > 0 {
+			m.chat.cursor = len(msgs) - 1
+		}
+	case "enter":
+		if len(msgs) > 0 && m.chat.cursor < len(msgs) {
+			entry := msgs[m.chat.cursor]
+			m.chat.selectedEntry = &entry
+			m.chat.msgDetail = nil
+			m.chat.msgDetailLoading = true
+			return m, loadMsgDetail(m.dataPath, entry)
+		}
+	}
+	return m, nil
+}
+
+// handleChatSearchInput processes key presses while the Chat search input is active.
+// All keys are captured here to prevent global shortcut conflicts.
+func (m Model) handleChatSearchInput(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "esc":
+		// Clear search and exit input mode.
+		m.chat.searchInput = false
+		m.chat.searchTerm = ""
+		m.chat.cursor = 0
+		return m, nil
+	case "enter":
+		// Confirm search — exit input mode but keep filter active.
+		m.chat.searchInput = false
+		return m, nil
+	case "backspace":
+		if len(m.chat.searchTerm) > 0 {
+			runes := []rune(m.chat.searchTerm)
+			m.chat.searchTerm = string(runes[:len(runes)-1])
+			m.chat.cursor = 0
+		}
+		return m, nil
+	case "up", "k":
+		if m.chat.cursor > 0 {
+			m.chat.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		msgs := m.chatMessages()
+		if m.chat.cursor < len(msgs)-1 {
+			m.chat.cursor++
+		}
+		return m, nil
+	default:
+		// Append printable characters to search term.
+		// Accepts ASCII, CJK, and any other printable runes.
+		// bubbletea sends multi-byte chars (e.g. Chinese) as their string value.
+		runes := []rune(key)
+		if len(runes) > 0 && !isControlKey(key) {
+			m.chat.searchTerm += key
+			m.chat.cursor = 0
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// isControlKey returns true if the key string represents a control/special key
+// rather than printable input. Used to distinguish between "a" (printable) and
+// "ctrl+a" or "tab" (control).
+func isControlKey(key string) bool {
+	switch key {
+	case "up", "down", "left", "right",
+		"home", "end", "pgup", "pgdown",
+		"tab", "shift+tab",
+		"ctrl+a", "ctrl+b", "ctrl+c", "ctrl+d", "ctrl+e", "ctrl+f",
+		"ctrl+g", "ctrl+h", "ctrl+i", "ctrl+j", "ctrl+k", "ctrl+l",
+		"ctrl+m", "ctrl+n", "ctrl+o", "ctrl+p", "ctrl+q", "ctrl+r",
+		"ctrl+s", "ctrl+t", "ctrl+u", "ctrl+v", "ctrl+w", "ctrl+x",
+		"ctrl+y", "ctrl+z",
+		"f1", "f2", "f3", "f4", "f5", "f6",
+		"f7", "f8", "f9", "f10", "f11", "f12",
+		"delete", "insert":
+		return true
+	}
+	return strings.HasPrefix(key, "ctrl+") || strings.HasPrefix(key, "alt+")
+}
+
+// chatMessages returns all individual messages matching the current search filter,
+// sorted by timestamp descending. Used by Flat and Search modes.
+func (m Model) chatMessages() []data.UsageEntry {
+	term := strings.ToLower(m.chat.searchTerm)
+	var msgs []data.UsageEntry
+	for i := range m.blocks {
+		b := m.blocks[i]
+		if b.IsGap {
+			continue
+		}
+		for _, e := range b.Entries {
+			if term != "" {
+				if !strings.Contains(strings.ToLower(e.UserPrompt), term) &&
+					!strings.Contains(strings.ToLower(e.CWD), term) {
+					continue
+				}
+			}
+			msgs = append(msgs, e)
+		}
+	}
+	// Sort by timestamp descending (newest first).
+	sort.SliceStable(msgs, func(i, j int) bool {
+		return msgs[i].Timestamp.After(msgs[j].Timestamp)
+	})
+	return msgs
+}
+
+// chatVisibleRows returns the number of data rows that fit in the Chat panel.
+func (m Model) chatVisibleRows() int {
+	// title(1) + searchBox(3) + col header(1) + divider(1) + border(2) + footer(1) = 9
+	inner := m.height - 9
+	if inner < 1 {
+		return 1
+	}
+	return inner
+}
+
+// jumpToSessionDetail switches to the Sessions tab, finds the session block
+// containing the given entry, opens its detail view, and positions the message
+// cursor on the matching message. This lets users see the full session context
+// around a search result.
+func (m Model) jumpToSessionDetail(entry data.UsageEntry) Model {
+	m.tab = tabSessions
+	m.chat.showDetail = false
+
+	// Find the session block index in the sorted session rows.
+	rows := m.sessionRows()
+	for i, b := range rows {
+		// Match by checking if the block's time window contains the entry.
+		for _, e := range b.Entries {
+			if e.MessageID == entry.MessageID && e.SessionID == entry.SessionID {
+				m.sessions.cursor = i
+				m.sessions.view = viewDetail
+				// Find the message index within the sorted detail entries.
+				sorted := sortedEntries(b.Entries, m.sessions.detailSort, m.sessions.detailSortAsc)
+				for j, se := range sorted {
+					if se.MessageID == entry.MessageID {
+						m.sessions.detailMsgCursor = j
+						break
+					}
+				}
+				return m
+			}
+		}
+	}
+	// Fallback: just switch to sessions list if session not found.
+	m.sessions.view = viewList
+	return m
 }
 
 // ── Derived data ──────────────────────────────────────────────────────────────
