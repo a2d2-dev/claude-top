@@ -64,9 +64,9 @@ var sortColNames = []string{"Start", "Updated", "Msgs", "Tokens", "Cost", "Dir"}
 type detailSortCol int
 
 const (
-	detailSortCost    detailSortCol = iota // default: highest cost first
+	detailSortTime    detailSortCol = iota // default: chronological order
+	detailSortCost
 	detailSortTokens
-	detailSortTime
 	detailSortModel
 	detailSortColCount
 )
