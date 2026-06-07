@@ -25,14 +25,14 @@ type tabID int
 
 const (
 	tabOverview tabID = iota
+	tabChat
 	tabSessions
 	tabDaily
 	tabMonthly
-	tabChat
 	tabCount
 )
 
-var tabNames = []string{"Overview", "Sessions", "Daily", "Monthly", "Chat"}
+var tabNames = []string{"Overview", "Chat", "Sessions", "Daily", "Monthly"}
 
 // ── View / sort enums (Sessions tab) ─────────────────────────────────────────
 
@@ -394,16 +394,16 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		m.tab = tabOverview
 		return m, nil
 	case "2":
-		m.tab = tabSessions
+		m.tab = tabChat
 		return m, nil
 	case "3":
-		m.tab = tabDaily
+		m.tab = tabSessions
 		return m, nil
 	case "4":
-		m.tab = tabMonthly
+		m.tab = tabDaily
 		return m, nil
 	case "5":
-		m.tab = tabChat
+		m.tab = tabMonthly
 		return m, nil
 	case "tab":
 		m.tab = (m.tab + 1) % tabCount
