@@ -7,3 +7,4 @@ backend/node_modules/
 backend/.wrangler/
 # Generated wrangler config (never commit — contains real resource IDs)
 backend/wrangler.generated.toml
+.claude/worktrees/
