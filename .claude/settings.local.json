@@ -4,7 +4,19 @@
       "Bash(find ~/.claude/projects -name *.jsonl)",
       "Bash(go build:*)",
       "Bash(go vet:*)",
-      "Bash(time go:*)"
+      "Bash(time go:*)",
+      "Bash(gh run:*)",
+      "Read(//Users/neov/.codex/**)",
+      "Read(//Users/neov/.config/**)",
+      "Bash(find /Users/neov/src/github.com/a2d2-dev/claude-top/internal -name *.go)",
+      "Bash(python3 -m json.tool)",
+      "Bash(xargs -I{} ls ~/.codex/sessions/{}/)",
+      "Bash(find /Users/neov/src/github.com/a2d2-dev/claude-top/backend/src -type f -name *.ts)",
+      "Bash(find /Users/neov/src/github.com/a2d2-dev/claude-top -path */.claude -prune -o -path */node_modules -prune -o -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\) -print)",
+      "Bash(find /Users/neov/src/github.com/a2d2-dev/claude-top -name *.sql -o -name schema* -o -name *migration*)",
+      "Bash(grep -r 'CREATE TABLE.*uploads' /Users/neov/src/github.com/a2d2-dev/claude-top --include=*.ts --include=*.sql)",
+      "Bash(find ~/.codex/sessions -name *.jsonl)",
+      "Bash(gh issue:*)"
     ]
   }
 }
