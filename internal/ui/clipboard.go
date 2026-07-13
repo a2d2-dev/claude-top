@@ -51,6 +51,8 @@ func formatMsgForCopy(e data.UsageEntry, sessionCost float64) string {
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Time:          %s\n", e.Timestamp.Local().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&sb, "Session ID:    %s\n", e.SessionID)
+	fmt.Fprintf(&sb, "Directory:     %s\n", e.CWD)
 	fmt.Fprintf(&sb, "Model:         %s\n", e.Model)
 	fmt.Fprintf(&sb, "Cost:          $%.6f  (%.1f%% of session)\n", e.CostUSD, costPct)
 	fmt.Fprintf(&sb, "\nTOKEN BREAKDOWN\n")

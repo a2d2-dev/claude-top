@@ -492,6 +492,10 @@ func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, detail *data
 		fmt.Sprintf("  %s  %s",
 			labelStyle.Render("Time: "), valueStyle.Render(e.Timestamp.Local().Format("2006-01-02 15:04:05"))),
 		fmt.Sprintf("  %s  %s",
+			labelStyle.Render("Session ID:"), mutedStyle.Render(truncateStr(e.SessionID, max(8, innerW-18)))),
+		fmt.Sprintf("  %s  %s",
+			labelStyle.Render("Directory: "), mutedStyle.Render(shortenPath(e.CWD, max(8, innerW-18)))),
+		fmt.Sprintf("  %s  %s",
 			labelStyle.Render("Model:"), lipgloss.NewStyle().Foreground(modelColor(e.Model)).Bold(true).Render(e.Model)),
 		fmt.Sprintf("  %s  %s  %s",
 			labelStyle.Render("Cost: "),
@@ -639,16 +643,19 @@ func renderDetailHead(s *data.SessionBlock, innerW int) string {
 	tc := s.TokenCounts
 	totalTok := tc.TotalTokens()
 
+	sessionIDs := representativeSessionIDs(s, innerW-18)
+	directory := shortenPath(s.Directory, innerW-17)
+
 	lines := []string{
 		sectionTitleStyle.Render("  SESSION DETAIL"),
-		fmt.Sprintf("  %s %s → %s  (%s)    %s %s",
+		fmt.Sprintf("  %s %s → %s  (%s)",
 			labelStyle.Render("Window:"),
 			s.StartTime.Local().Format("2006-01-02 15:04"),
 			updatedAt.Local().Format("15:04"),
 			formatDuration(updatedAt.Sub(s.StartTime)),
-			labelStyle.Render("Dir:"),
-			mutedStyle.Render(shortenPath(s.Directory, innerW-50)),
 		),
+		fmt.Sprintf("  %s %s", labelStyle.Render("Session ID:"), mutedStyle.Render(sessionIDs)),
+		fmt.Sprintf("  %s %s", labelStyle.Render("Directory: "), mutedStyle.Render(directory)),
 		fmt.Sprintf("  %s %s · %s %s · %s %s · %s %s  =  %s  %s  %s",
 			labelStyle.Render("In:"), mutedStyle.Render(formatInt(tc.InputTokens)),
 			labelStyle.Render("Out:"), mutedStyle.Render(formatInt(tc.OutputTokens)),
@@ -689,6 +696,31 @@ func renderDetailHead(s *data.SessionBlock, innerW int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func representativeSessionIDs(s *data.SessionBlock, width int) string {
+	if width < 8 {
+		width = 8
+	}
+	seen := make(map[string]bool)
+	var ids []string
+	for _, e := range s.Entries {
+		if e.SessionID == "" || seen[e.SessionID] {
+			continue
+		}
+		seen[e.SessionID] = true
+		if len(ids) < 3 {
+			ids = append(ids, e.SessionID)
+		}
+	}
+	if len(ids) == 0 {
+		return "-"
+	}
+	text := strings.Join(ids, ", ")
+	if len(seen) > len(ids) {
+		text += fmt.Sprintf(" (+%d more)", len(seen)-len(ids))
+	}
+	return truncateStr(text, width)
 }
 
 // renderDetailMsgsContent renders the content for the messages box.
