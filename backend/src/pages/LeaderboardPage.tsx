@@ -27,6 +27,19 @@ interface LeaderboardPageProps {
   source?: 'claude' | 'codex';
 }
 
+
+const safeJSONStringify = (value: unknown): string =>
+  JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {
+    switch (char) {
+      case '<': return '\\u003c';
+      case '>': return '\\u003e';
+      case '&': return '\\u0026';
+      case '\u2028': return '\\u2028';
+      case '\u2029': return '\\u2029';
+      default: return char;
+    }
+  });
+
 // ── 功能特性（双语） ──────────────────────────────────────────
 
 const FEATURES = [
@@ -970,7 +983,7 @@ export const LeaderboardPage = ({ rows, period, defaultTab = 'about', source = '
   >
     <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
     <script dangerouslySetInnerHTML={{ __html: pageScript
-      .replace('__DEFAULT_TAB__', JSON.stringify(defaultTab ?? 'about'))
+      .replace('__DEFAULT_TAB__', safeJSONStringify(defaultTab ?? 'about'))
     }} />
 
     {/* ── Tab 导航栏（三 tab 扁平结构）── */}

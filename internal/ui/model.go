@@ -41,8 +41,8 @@ type viewMode int
 
 const (
 	viewList      viewMode = iota
-	viewDetail    // detail for the row under cursor
-	viewMsgDetail // full detail for the selected message
+	viewDetail             // detail for the row under cursor
+	viewMsgDetail          // full detail for the selected message
 )
 
 // sortCol selects which column to sort the sessions table by.
@@ -64,13 +64,12 @@ var sortColNames = []string{"Start", "Updated", "Msgs", "Tokens", "Cost", "Dir"}
 type detailSortCol int
 
 const (
-	detailSortTime    detailSortCol = iota // default: chronological order
+	detailSortTime detailSortCol = iota // default: chronological order
 	detailSortCost
 	detailSortTokens
 	detailSortModel
 	detailSortColCount
 )
-
 
 // ── Auth state ────────────────────────────────────────────────────────────────
 
@@ -170,10 +169,10 @@ type tickMsg time.Time
 
 // loadedMsg carries session data from either a quick cache read or a full refresh.
 type loadedMsg struct {
-	blocks          []data.SessionBlock
-	err             error
-	fromCache       bool // true = preliminary data from gob cache; full refresh still pending
-	codexExecGap    int  // number of Codex exec sessions with no billing data
+	blocks       []data.SessionBlock
+	err          error
+	fromCache    bool // true = preliminary data from gob cache; full refresh still pending
+	codexExecGap int  // number of Codex exec sessions with no billing data
 }
 
 // msgDetailLoadedMsg is sent when on-demand message detail loading completes.
@@ -189,12 +188,12 @@ type sessionsState struct {
 	sortColumn       sortCol
 	sortAsc          bool
 	view             viewMode
-	detailMsgCursor  int           // selected message index in detail view
-	detailSort       detailSortCol // sort column for message table in detail view
-	detailSortAsc    bool          // sort direction for message table
-	copyFeedback     string        // set briefly after clipboard copy ("Copied!" or "Copy failed")
+	detailMsgCursor  int                 // selected message index in detail view
+	detailSort       detailSortCol       // sort column for message table in detail view
+	detailSortAsc    bool                // sort direction for message table
+	copyFeedback     string              // set briefly after clipboard copy ("Copied!" or "Copy failed")
 	msgDetail        *data.MessageDetail // loaded on-demand when entering viewMsgDetail
-	msgDetailLoading bool          // true while async detail load is in flight
+	msgDetailLoading bool                // true while async detail load is in flight
 
 	// Source filter toggles. Both default true (show all sources).
 	showClaude bool
@@ -203,13 +202,13 @@ type sessionsState struct {
 
 // chatState holds all UI state for the Chat tab.
 type chatState struct {
-	searchTerm       string             // current search query
-	searchInput      bool               // true when search input is actively accepting keystrokes
-	cursor           int                // selected row in the message list
-	selectedEntry    *data.UsageEntry   // entry under cursor (for detail loading)
+	searchTerm       string              // current search query
+	searchInput      bool                // true when search input is actively accepting keystrokes
+	cursor           int                 // selected row in the message list
+	selectedEntry    *data.UsageEntry    // entry under cursor (for detail loading)
 	msgDetail        *data.MessageDetail // loaded on-demand when viewing message detail
-	msgDetailLoading bool               // true while async detail load is in flight
-	showDetail       bool               // true when viewing full message content
+	msgDetailLoading bool                // true while async detail load is in flight
+	showDetail       bool                // true when viewing full message content
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -243,8 +242,11 @@ type Model struct {
 	sessions   sessionsState
 	dailyCur   int // cursor row in Daily tab
 	monthly    []data.MonthlyStats
-	monthlyCur int // cursor row in Monthly tab
+	monthlyCur int       // cursor row in Monthly tab
 	chat       chatState // Chat tab state
+
+	// Cached Sessions rows avoid filtering/sorting all blocks on every render/key press.
+	sessionRowsCache []data.SessionBlock
 
 	// Auth overlay — active when auth.phase != authIdle.
 	authOverlay authState
@@ -301,6 +303,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.fromCache {
 			if msg.err == nil && len(msg.blocks) > 0 {
 				m.blocks = msg.blocks
+				m.refreshSessionRows()
 				m.daily = core.BuildDailyStats(m.blocks)
 				m.monthly = core.BuildMonthlyStats(m.blocks)
 				m.loading = false
@@ -316,6 +319,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.blocks = msg.blocks
+			m.refreshSessionRows()
 			m.daily = core.BuildDailyStats(m.blocks)
 			m.monthly = core.BuildMonthlyStats(m.blocks)
 			m.err = nil
@@ -551,12 +555,15 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 	case "s":
 		m.sessions.sortColumn = (m.sessions.sortColumn + 1) % sortColCount
 		m.sessions.cursor = 0
+		m.refreshSessionRows()
 	case "S":
 		m.sessions.sortColumn = (m.sessions.sortColumn + sortColCount - 1) % sortColCount
 		m.sessions.cursor = 0
+		m.refreshSessionRows()
 	case "/":
 		m.sessions.sortAsc = !m.sessions.sortAsc
 		m.sessions.cursor = 0
+		m.refreshSessionRows()
 	case "1", "c":
 		// Toggle Claude source filter (only meaningful in "all" mode).
 		if m.source != "codex" {
@@ -566,6 +573,7 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 			}
 			m.sessions.showClaude = !m.sessions.showClaude
 			m.sessions.cursor = 0
+			m.refreshSessionRows()
 		}
 	case "2", "x":
 		// Toggle Codex source filter (only meaningful in "all" mode).
@@ -575,6 +583,7 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 			}
 			m.sessions.showCodex = !m.sessions.showCodex
 			m.sessions.cursor = 0
+			m.refreshSessionRows()
 		}
 	case "enter":
 		if len(rows) > 0 && m.sessions.cursor < len(rows) {
@@ -880,7 +889,11 @@ func (m Model) jumpToSessionDetail(entry data.UsageEntry) Model {
 // Active blocks are included so the user can see in-progress sessions; they are rendered
 // with a ● indicator in the table.
 func (m Model) sessionRows() []data.SessionBlock {
-	var rows []data.SessionBlock
+	return m.sessionRowsCache
+}
+
+func (m *Model) refreshSessionRows() {
+	rows := make([]data.SessionBlock, 0, len(m.blocks))
 	for i := range m.blocks {
 		b := m.blocks[i]
 		if b.IsGap {
@@ -896,7 +909,7 @@ func (m Model) sessionRows() []data.SessionBlock {
 		rows = append(rows, b)
 	}
 	sortSessionRows(rows, m.sessions.sortColumn, m.sessions.sortAsc)
-	return rows
+	m.sessionRowsCache = rows
 }
 
 // sortSessionRows sorts session blocks in-place.
@@ -1056,7 +1069,6 @@ func loadData(dataPath, codexPath, source string) tea.Cmd {
 }
 
 // ── Auth handlers ─────────────────────────────────────────────────────────────
-
 
 // handleAuthKey handles keys while the auth overlay is showing.
 func (m Model) handleAuthKey(key string) (tea.Model, tea.Cmd) {
